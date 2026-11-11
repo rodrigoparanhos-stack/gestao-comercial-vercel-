@@ -343,6 +343,26 @@ const CANAL5_ORDER = ['Blackbox', 'Leadbroker', 'Indicação', 'Recomendação',
 const CANAL5_COLOR = { Blackbox: 'var(--accent)', Leadbroker: 'var(--info)', 'Indicação': 'var(--safe)', 'Recomendação': 'var(--care)', Recovery: '#8B5CF6', 'Lista Fria': '#38BDF8', 'Inbound (não classificado)': 'var(--muted)' };
 const TIER_LP_MAP = { tiny: 'tiny', small: 'small', medium: 'medium', large: 'large', enterprise: 'enterprise' };
 function normName(s) { return String(s || '').toLowerCase().trim().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]/g, ''); }
+// normNameTokens: mesma normalização mas preserva fronteira de palavra (espaço em vez de colar
+// tudo) — usado só pro fallback substring do resolveByName/buildNameIndex abaixo, pra não deixar
+// uma palavra de uma empresa colar com o início de outra por acidente (ver bug real 2026-11-11:
+// "Suporte Smart Mogi-Gaçu-Centro" virava "suportesmartmogigacucentro" colado, que CONTÉM
+// "portesmart" como substring pura coincidência de "suPORTE"+"SMART" — e um lead curto/lixo
+// chamado literalmente "Porte Smart" (canal errado) batia nisso, classificando a venda errado
+// como Leadbroker quando o CRM confirma Blackbox). Tokens com <3 letras são descartados (corta
+// sufixo tipo "ltda"/"me"/iniciais soltas tipo "S"/"B" que geravam falso-positivo igual).
+function normNameTokens(s) {
+  return String(s || '').toLowerCase().trim().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, ' ').trim().split(/\s+/).filter(t => t.length >= 3);
+}
+// Um candidato só entra no índice de substring se tiver substância: 1 token de 6+ letras, ou 2+
+// tokens de 3+ (mesmo espírito do limite de 6 caracteres antigo, mas por palavra não por string
+// colada — admite "Porte Smart" (2 tokens) como candidato, mas o match em si exige subset exato
+// de tokens, não substring cru, então "Porte Smart" nunca mais bate em "Suporte Smart...").
+function tokensQualify(tokens) {
+  if (!tokens.length) return false;
+  if (tokens.length >= 2) return true;
+  return tokens[0].length >= 6;
+}
 async function fetchLeadsSheet() {
   const res = await fetch(`https://docs.google.com/spreadsheets/d/${LEADS_SHEET_ID}/gviz/tq?tqx=out:csv`, { cache: 'no-store' });
   if (!res.ok) throw new Error('gviz fetch failed for leads sheet: ' + res.status);
@@ -371,7 +391,27 @@ function buildNameIndex(rows, field) {
     const vals = [...new Set(byName[k])];
     if (vals.length !== 1) return; // nome repetido com valores diferentes na fonte -> não usa nem exato nem substring
     exact[k] = vals[0];
-    if (k.length >= 6) sub.push([k, vals[0]]);
+  });
+  // tokensByName: um candidato de fallback por EMPRESA (não por linha), já que várias linhas da
+  // planilha podem repetir o mesmo nome — mesma regra de "só usa se o valor for único" do exact.
+  const tokensByName = {};
+  rows.forEach(r => {
+    const k = normName(r.company_name);
+    if (!k || tokensByName[k]) return;
+    const v = r[field];
+    if (!v) return;
+    tokensByName[k] = { tokens: normNameTokens(r.company_name), vals: new Set() };
+  });
+  rows.forEach(r => {
+    const k = normName(r.company_name);
+    const v = r[field];
+    if (!k || !v || !tokensByName[k]) return;
+    tokensByName[k].vals.add(v);
+  });
+  Object.values(tokensByName).forEach(entry => {
+    if (entry.vals.size !== 1) return;
+    if (!tokensQualify(entry.tokens)) return;
+    sub.push([entry.tokens, [...entry.vals][0]]);
   });
   return { exact, sub };
 }
@@ -379,8 +419,17 @@ function resolveByName(empresa, index) {
   const k = normName(empresa);
   if (!k) return null;
   if (index.exact[k]) return index.exact[k];
-  if (k.length < 6) return null;
-  const hits = index.sub.filter(([ck]) => k.includes(ck) || ck.includes(k));
+  const queryTokens = normNameTokens(empresa);
+  if (!tokensQualify(queryTokens)) return null;
+  const qSet = new Set(queryTokens);
+  const hits = index.sub.filter(([candTokens]) => {
+    const cSet = new Set(candTokens);
+    // subset num sentido ou no outro, nunca por substring de caracteres colados — token inteiro
+    // tem que bater com token inteiro (corrige o falso-positivo "Porte Smart" em "Suporte Smart...").
+    const candInQuery = candTokens.every(t => qSet.has(t));
+    const queryInCand = queryTokens.every(t => cSet.has(t));
+    return candInQuery || queryInCand;
+  });
   const vals = [...new Set(hits.map(h => h[1]))];
   return vals.length === 1 ? vals[0] : null;
 }
@@ -442,6 +491,11 @@ const CANAL_AQUISICAO_OVERRIDES = [
   // Recovery de verdade. Confirmado por Rodrigo 2026-10-28.
   { nome: normName('Casemaq'), canal: 'Recovery' },
   { nome: normName('InfoTech'), canal: 'Recovery' },
+  // DLOOK BAY LOJA DANI LTDA (SDR Fausto): sem match na planilha de leads, caía no fallback
+  // SDR_PRIMARY_CHANNEL['Fausto']='Leadbroker' — mas o CRM (consultado direto via localize_crm)
+  // confirma acquisition_channel='Blackbox' pra essa OP. Achado por Rodrigo 2026-11-11
+  // perguntando "tem certeza que o canal é leadbroker?" sobre as vendas de Leadbroker do mês.
+  { nome: normName('DLOOK BAY LOJA DANI LTDA'), canal: 'Blackbox' },
   // Lista Fria (prospecção fria, novo canal de novembro/2026) — todos os leads caem em
   // board="Outbound" no CRM, igual Recovery, então sem override viram Recovery aqui (mesmo tipo
   // de confusão corrigido no SDR OS 2026-11-06 via acquisition_channel). closer_cockpit_calls
