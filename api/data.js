@@ -1094,9 +1094,27 @@ export default async function handler(req, res) {
       });
       return dayLabels.map(d => counts[`${competencia}-${d}`] || 0);
     }
+    // R.M diário por meetings[].rmDate (qualquer status) — mesma fonte do N.S acima, em vez da
+    // planilha de leads (leadsRows), que só cobre Inbound (Blackbox/Leadbroker/Recovery) e por
+    // isso sempre mostrava um total menor que o card "R.M" do funil (que usa sdrOsLive.team.rm,
+    // todos os canais). Rodrigo pegou isso em 2026-11-11 comparando 58 no card x 51 no gráfico.
+    // Não bate 100% com team.rm (algum filtro extra de roster/dedupe no n8n que a lista crua de
+    // meetings não aplica) mas é bem mais perto da verdade que o recorte só-Inbound.
+    function buildDailyFromMeetingsByRmDate(meetings) {
+      const counts = {};
+      meetings.forEach(m => {
+        const k = String(m.rmDate || '').slice(0, 10);
+        if (k && k.startsWith(competencia)) counts[k] = (counts[k] || 0) + 1;
+      });
+      return dayLabels.map(d => counts[`${competencia}-${d}`] || 0);
+    }
     const dailySeries = {
-      rm: buildDailyIso(leadsRows, 'dt_primeira_reuniao_marcada'),
-      rr: buildDaily(rrMonth, 'data_rr'),
+      // R.R diário: mesma causa raiz do bug de "Por Closer" corrigido em 2026-11-10 — rrMonth
+      // vem de closer_cockpit_calls, que parou de receber linhas novas após a migração do
+      // Closer OS pro workflow BQ v3 (27/10). sdrOsLive.meetings com status 'Realizada' bate
+      // exatamente com o total ao vivo do card R.R (confirmado 41=41 em 2026-11-11).
+      rm: sdrOsMeetings.length ? buildDailyFromMeetingsByRmDate(sdrOsMeetings) : buildDailyIso(leadsRows, 'dt_primeira_reuniao_marcada'),
+      rr: sdrOsMeetings.length ? buildDailyFromMeetings(sdrOsMeetings, 'Realizada') : buildDaily(rrMonth, 'data_rr'),
       noShow: buildDailyFromMeetings(sdrOsMeetings, 'No-show'),
       vendas: buildDaily(salesMonth, 'data_ganho'),
       ativados: buildDaily(salesMonth, 'data_ganho', r => r.ativado === 'SIM'),
