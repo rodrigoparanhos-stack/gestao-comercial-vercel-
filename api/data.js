@@ -1106,12 +1106,30 @@ export default async function handler(req, res) {
       const counts = map || {};
       return dayLabels.map(d => counts[`${competencia}-${d}`] || 0);
     }
+    // Fallback intermediário: aproximação por meetings[].rmDate (não bate exato com o card, mas é
+    // bem mais perto da verdade que a planilha de leads só-Inbound) — usado só se dailyRmTeam vier
+    // ausente do payload. Achado real em 2026-11-11: numa execução AGENDADA do n8n (mas não numa
+    // execução manual de teste, mesmo código/versão) o campo simplesmente não apareceu no payload
+    // — suspeita de pressão de performance/memória nesse ambiente (já documentado no workflow:
+    // "alguns syncs desse ambiente cortam silenciosamente"). Corrigido lá (memoização de
+    // rmDateForRow), mas como fallback nunca é demais: nunca mais cair direto pro pior caso (51)
+    // se esse campo falhar de novo por qualquer motivo.
+    function buildDailyFromMeetingsByRmDateApprox(meetings) {
+      const counts = {};
+      meetings.forEach(m => {
+        const k = String(m.rmDate || '').slice(0, 10);
+        if (k && k.startsWith(competencia)) counts[k] = (counts[k] || 0) + 1;
+      });
+      return dayLabels.map(d => counts[`${competencia}-${d}`] || 0);
+    }
     const dailySeries = {
       // R.R diário: mesma causa raiz do bug de "Por Closer" corrigido em 2026-11-10 — rrMonth
       // vem de closer_cockpit_calls, que parou de receber linhas novas após a migração do
       // Closer OS pro workflow BQ v3 (27/10). sdrOsLive.meetings com status 'Realizada' bate
       // exatamente com o total ao vivo do card R.R (confirmado 41=41 em 2026-11-11).
-      rm: sdrOsLive && sdrOsLive.dailyRmTeam ? buildDailyFromRmTeam(sdrOsLive.dailyRmTeam) : buildDailyIso(leadsRows, 'dt_primeira_reuniao_marcada'),
+      rm: (sdrOsLive && sdrOsLive.dailyRmTeam && Object.keys(sdrOsLive.dailyRmTeam).length)
+        ? buildDailyFromRmTeam(sdrOsLive.dailyRmTeam)
+        : (sdrOsMeetings.length ? buildDailyFromMeetingsByRmDateApprox(sdrOsMeetings) : buildDailyIso(leadsRows, 'dt_primeira_reuniao_marcada')),
       rr: sdrOsMeetings.length ? buildDailyFromMeetings(sdrOsMeetings, 'Realizada') : buildDaily(rrMonth, 'data_rr'),
       noShow: buildDailyFromMeetings(sdrOsMeetings, 'No-show'),
       vendas: buildDaily(salesMonth, 'data_ganho'),
