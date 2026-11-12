@@ -671,7 +671,11 @@ export default async function handler(req, res) {
     // quebra a página) — isso cobre "Inbound (não classificado)", que o SDR OS não tem.
     const sdrOsChannelAgg = {};
     if (sdrOsLive && Array.isArray(sdrOsLive.channels)) {
-      sdrOsLive.channels.forEach(c => { sdrOsChannelAgg[c.name] = { leads: c.leads, rm: c.rm, leadsMeta: c.leadsMeta }; });
+      sdrOsLive.channels.forEach(c => { sdrOsChannelAgg[c.name] = { leads: c.leads, rm: c.rm, leadsMeta: c.leadsMeta,
+        // rmMeta/rrMeta/salesMeta: metas por canal já vem prontas do sdr_os_targets (mesma fonte
+        // do leadsMeta acima) — só não eram repassadas pro payload do Gestão Comercial. Pedido
+        // por Rodrigo 2026-11-12 pro popup "Meta x Projetado x Realizado" por canal.
+        rmMeta: c.rmMeta, rrMeta: c.rrMeta, salesMeta: c.salesMeta }; });
     }
     // Meta de leads por canal (sdr_os_targets, via SDR OS) e Projetado (meta × dias úteis
     // decorridos/total) — pedido por Rodrigo 2026-10-13 pro drill-down do card "Leads".
@@ -702,8 +706,19 @@ export default async function handler(req, res) {
         agg = liveAgg || sheetAgg;
       }
       const leadsMeta = agg && agg.leadsMeta != null ? agg.leadsMeta : null;
+      // rmMeta/rrMeta/salesMeta sempre vêm do agregado "cru" do SDR OS (liveAgg), nunca do `agg`
+      // escolhido acima pra REALIZADO — pra Leadbroker, `agg` vira o sheetAgg (planilha de leads,
+      // sem esses campos de meta); pra Blackbox, `agg` já tem leads/rm descontados de Leadbroker,
+      // mas a meta do canal não deve ser descontada (é um alvo próprio, já separado na fonte).
+      const projetar = v => v != null ? Math.round(v * leadsPaceFrac) : null;
+      const rmMeta = liveAgg && liveAgg.rmMeta != null ? liveAgg.rmMeta : null;
+      const rrMeta = liveAgg && liveAgg.rrMeta != null ? liveAgg.rrMeta : null;
+      const vendasMeta = liveAgg && liveAgg.salesMeta != null ? liveAgg.salesMeta : null;
       return { nome: k, cor: CANAL5_COLOR[k] || 'var(--muted)', leads: agg ? agg.leads : null, rm: agg ? agg.rm : null, rr,
-        leadsMeta, leadsProjetado: leadsMeta != null ? Math.round(leadsMeta * leadsPaceFrac) : null,
+        leadsMeta, leadsProjetado: projetar(leadsMeta),
+        rmMeta, rmProjetado: projetar(rmMeta),
+        rrMeta, rrProjetado: projetar(rrMeta),
+        vendasMeta, vendasProjetado: projetar(vendasMeta),
         vendas: s.length, ativ, receita: s.reduce((a, r) => a + toNum(r.receita_m1), 0),
         receitaAtiv: s.filter(r => r.ativado === 'SIM').reduce((a, r) => a + receitaAtivadaValor(r), 0),
         // Saber/Ter/Executar vendido por canal — pedido por Rodrigo 2026-10-02 (indicador

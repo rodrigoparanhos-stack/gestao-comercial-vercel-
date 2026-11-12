@@ -180,8 +180,10 @@
   .chgrid{display:grid; grid-template-columns:repeat(6,1fr); gap:10px;}
   @media (max-width:1100px){.chgrid{grid-template-columns:repeat(3,1fr);}}
   @media (max-width:620px){.chgrid{grid-template-columns:repeat(2,1fr);}}
-  .chanbox{background:var(--surface); border:1px solid var(--line); border-radius:var(--radius-card); padding:14px; box-shadow:var(--shadow-card); display:flex; flex-direction:column; gap:7px;}
-  .chanbox.empty{opacity:.5;}
+  .chanbox{background:var(--surface); border:1px solid var(--line); border-radius:var(--radius-card); padding:14px; box-shadow:var(--shadow-card); display:flex; flex-direction:column; gap:7px; cursor:pointer; transition:transform .15s, box-shadow .15s;}
+  .chanbox:hover{transform:translateY(-2px); box-shadow:0 14px 32px rgba(17,17,17,0.1);}
+  .chanbox.empty{opacity:.5; cursor:default;}
+  .chanbox.empty:hover{transform:none; box-shadow:var(--shadow-card);}
   .chanbox .top{display:flex; justify-content:space-between; align-items:center;}
   .chanbox .name{font-weight:700; font-size:12px;}
   .chanbox .chip{width:8px; height:8px; border-radius:2px;}
@@ -189,6 +191,22 @@
   .chanbox .fm{display:flex; justify-content:space-between; font-size:10.5px; color:var(--muted);}
   .chanbox .fm b{color:var(--ink-soft); font-weight:700;}
   .chanbox .fm .cr{font-size:9px; color:var(--muted); opacity:.75;}
+
+  /* ---- modal por canal: Meta x Projetado x Realizado ---- */
+  .modal-overlay{position:fixed; inset:0; background:rgba(17,17,17,.45); z-index:200; display:none; align-items:center; justify-content:center; padding:20px;}
+  .modal-overlay.open{display:flex;}
+  .modal-box{background:var(--surface); border-radius:var(--radius-panel); box-shadow:0 24px 60px rgba(17,17,17,.25); width:100%; max-width:480px; max-height:90vh; overflow-y:auto; padding:22px;}
+  .modal-box .m-head{display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;}
+  .modal-box .m-head .name{font-size:16px; font-weight:700;}
+  .modal-box .m-close{border:none; background:var(--surface-muted); color:var(--muted-strong); font-weight:700; font-size:16px; line-height:1; cursor:pointer; width:28px; height:28px; border-radius:8px;}
+  .modal-box .m-sub{font-size:11px; color:var(--muted); margin-bottom:16px;}
+  .modal-box table{width:100%; border-collapse:collapse; font-size:12px;}
+  .modal-box th{text-align:left; font-size:9.5px; text-transform:uppercase; letter-spacing:.04em; color:var(--muted); font-weight:700; padding:6px 4px; border-bottom:1px solid var(--line);}
+  .modal-box th:not(:first-child), .modal-box td:not(:first-child){text-align:right; font-family:ui-monospace,monospace;}
+  .modal-box td{padding:9px 4px; border-bottom:1px solid var(--line); font-weight:600;}
+  .modal-box tr:last-child td{border-bottom:none;}
+  .modal-box td.row-label{font-weight:700; color:var(--ink-soft);}
+  .modal-box td.row-realizado{color:var(--brand-red); font-weight:700;}
 
   /* ---- people ---- */
   .people{display:flex; flex-direction:column; gap:10px;}
@@ -323,7 +341,8 @@ function buildFrame(){
     '<section><div class="section-head"><span class="n">06</span><h2>Taxa de conversão · R.R → Venda</h2><p>Por Closer, ranqueado</p></div>'+
       '<div class="panel"><div class="conv-chart" id="convChart"></div></div>'+
     '</section>'+
-    '<div id="calloutZone"></div>';
+    '<div id="calloutZone"></div>'+
+    '<div class="modal-overlay" id="canalModalOverlay"><div class="modal-box" id="canalModalBox"></div></div>';
 }
 
 function movingAvg(data, window){
@@ -635,7 +654,9 @@ function renderCanal(canais){
   canais.forEach(function(c){
     var crRm = c.leads>0? c.rm/c.leads : 0;
     var crRr = c.rm>0? c.rr/c.rm : 0;
-    var box = document.createElement('div'); box.className='chanbox'+(!c.leads && !c.rm && !c.rr && !c.vendas? ' empty':'');
+    var crVendas = c.rr>0? c.vendas/c.rr : 0;
+    var isEmpty = !c.leads && !c.rm && !c.rr && !c.vendas;
+    var box = document.createElement('div'); box.className='chanbox'+(isEmpty? ' empty':'');
     var color = CANAL_COLOR[c.nome] || '#9C9384';
     box.innerHTML =
       '<div class="top"><span class="name">'+c.nome+'</span><span class="chip" style="background:'+color+'"></span></div>'+
@@ -643,9 +664,40 @@ function renderCanal(canais){
       '<div class="fm"><span>Leads</span><b>'+fmt(c.leads)+'</b></div>'+
       '<div class="fm"><span>R.M <span class="cr">'+pct(crRm)+'</span></span><b>'+fmt(c.rm)+'</b></div>'+
       '<div class="fm"><span>R.R <span class="cr">'+pct(crRr)+'</span></span><b>'+fmt(c.rr)+'</b></div>'+
-      '<div class="fm"><span>Vendas</span><b>'+fmt(c.vendas)+'</b></div>';
+      '<div class="fm"><span>Vendas <span class="cr">'+pct(crVendas)+'</span></span><b>'+fmt(c.vendas)+'</b></div>';
+    if(!isEmpty) box.addEventListener('click', function(){ openCanalModal(c); });
     canalWrap.appendChild(box);
   });
+}
+
+// Popup "Meta x Projetado x Realizado" por canal — pedido por Rodrigo 2026-11-12, clicando no
+// card do canal (seção "Por canal"). Mesmos campos Meta/Projetado já usados no funil geral
+// (seção 01), só recortados por canal (rmMeta/rrMeta/vendasMeta vêm do sdr_os_targets, mesma
+// fonte do leadsMeta que o card de Leads já usava).
+function openCanalModal(c){
+  var overlay = document.getElementById('canalModalOverlay');
+  var box = document.getElementById('canalModalBox');
+  var color = CANAL_COLOR[c.nome] || '#9C9384';
+  var rows = [
+    { label:'Leads', meta:c.leadsMeta, proj:c.leadsProjetado, real:c.leads },
+    { label:'R.M', meta:c.rmMeta, proj:c.rmProjetado, real:c.rm },
+    { label:'R.R', meta:c.rrMeta, proj:c.rrProjetado, real:c.rr },
+    { label:'Vendas', meta:c.vendasMeta, proj:c.vendasProjetado, real:c.vendas },
+  ];
+  box.innerHTML =
+    '<div class="m-head"><span class="name"><span class="chip" style="display:inline-block;width:8px;height:8px;border-radius:2px;background:'+color+';margin-right:6px;"></span>'+c.nome+'</span><button class="m-close" id="canalModalClose">✕</button></div>'+
+    '<div class="m-sub">Meta — alvo do mês · Projetado — cascata pelas taxas planejadas até hoje · Realizado — CRM/Conta Azul ao vivo</div>'+
+    '<table><tr><th>Indicador</th><th>Meta</th><th>Projetado</th><th>Realizado</th></tr>'+
+    rows.map(function(r){
+      return '<tr><td class="row-label">'+r.label+'</td><td>'+(r.meta!=null? fmt(r.meta):'—')+'</td><td>'+(r.proj!=null? fmt(r.proj):'—')+'</td><td class="row-realizado">'+fmt(r.real)+'</td></tr>';
+    }).join('')+
+    '</table>';
+  overlay.classList.add('open');
+  document.getElementById('canalModalClose').addEventListener('click', closeCanalModal);
+  overlay.onclick = function(ev){ if(ev.target===overlay) closeCanalModal(); };
+}
+function closeCanalModal(){
+  document.getElementById('canalModalOverlay').classList.remove('open');
 }
 
 function renderTier(tiers){
