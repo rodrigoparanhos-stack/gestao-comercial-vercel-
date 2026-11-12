@@ -510,6 +510,19 @@ const CANAL_AQUISICAO_OVERRIDES = [
   { nome: normName('MGI Metalurgica'), canal: 'Lista Fria' },
   { nome: normName('TDM Automação'), canal: 'Lista Fria' },
   { nome: normName('Profam'), canal: 'Lista Fria' },
+  // Mais 2 de Lista Fria (mesmo padrão acima, confirmados via CRM em 2026-11-12):
+  // CORREAMAQ e Clínica Dr. Agnaldo Lima (SDR Vitor, acquisition_channel="Prospecção Fria").
+  { nome: normName('CORREAMAQ'), canal: 'Lista Fria' },
+  { nome: normName('Clinica Dr Agnaldo Lima'), canal: 'Lista Fria' },
+  // Indicação não é exclusividade do Davi: Fausto (SDR) também tem leads confirmados no CRM com
+  // acquisition_channel="Indicação" (Indicação de Investidor/Parceiro) vindos do board Outbound —
+  // a regra "Outbound + SDR≠Davi = Recovery" jogava esses 3 pra Recovery por engano. Rodrigo
+  // perguntou 2026-11-12 "não tivemos nenhuma realizada de indicação?" e tinha razão: tinha sim,
+  // 3, só contadas no canal errado. Confirmado direto no CRM (acquisition_channel) via localize_crm
+  // /consultar_leads_crm — essas 3 são as únicas de Indicação-via-Fausto resolvidas em novembro.
+  { nome: normName('Arranjo Express Brasil'), canal: 'Indicação' },
+  { nome: normName('Hi-Teck Audio e Video'), canal: 'Indicação' },
+  { nome: normName('Aline Parente Psicologia'), canal: 'Indicação' },
 ];
 function canal5(row, leadsCanalIndex) {
   const empresaNorm = normName(row.empresa);
