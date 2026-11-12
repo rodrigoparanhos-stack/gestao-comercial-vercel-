@@ -476,26 +476,26 @@ function isVitor(row) { return sdrFirstName(row) === 'Vitor'; }
 // confirmações pontuais do Rodrigo (vendo o card no CRM) entram aqui. Chave = nome da empresa
 // normalizado (normName), case/acento-insensível.
 const CANAL_AQUISICAO_OVERRIDES = [
-  // confirmado por Rodrigo 2026-10-02 via print do CRM (campo "Canal de aquisição" real) —
-  // chave por substring normalizado (sem acento/maiúsculas/sufixo), igual resolveByName, pra
-  // não quebrar por causa de "LTDA"/variação de nome entre as fontes.
-  { nome: normName('Princess Presentes'), canal: 'Indicação' },
+  // confirmado por Rodrigo 2026-10-02 via print do CRM (campo "Canal de aquisição" real).
+  // `nome` fica no formato ORIGINAL (não colado) — resolveCanalOverride abaixo tokeniza na hora,
+  // comparando palavra inteira, nunca string colada (ver bug "iTeck" no comentário da função).
+  { nome: 'Princess Presentes', canal: 'Indicação' },
   // Nutrema entrou como "Recomendação" no CRM por erro de cadastro (confirmado por Rodrigo
   // 2026-10-02) — é Indicação de verdade, mas ele não tem como corrigir direto no CRM.
-  { nome: normName('Nutrema'), canal: 'Indicação' },
+  { nome: 'Nutrema', canal: 'Indicação' },
   // Zilix caía em "Inbound (não classificado)" (sem match no cruzamento por nome com a
   // planilha de leads) — Rodrigo confirmou 2026-10-02 que é Leadbroker.
-  { nome: normName('Zilix'), canal: 'Leadbroker' },
+  { nome: 'Zilix', canal: 'Leadbroker' },
   // Casemaq (SDR Lucas) e InfoTech (SDR Fausto) caíam em Blackbox (canal primário do SDR,
   // fallback de SDR_PRIMARY_CHANNEL) porque o lead foi movimentado errado no CRM — são
   // Recovery de verdade. Confirmado por Rodrigo 2026-10-28.
-  { nome: normName('Casemaq'), canal: 'Recovery' },
-  { nome: normName('InfoTech'), canal: 'Recovery' },
+  { nome: 'Casemaq', canal: 'Recovery' },
+  { nome: 'InfoTech', canal: 'Recovery' },
   // DLOOK BAY LOJA DANI LTDA (SDR Fausto): sem match na planilha de leads, caía no fallback
   // SDR_PRIMARY_CHANNEL['Fausto']='Leadbroker' — mas o CRM (consultado direto via localize_crm)
   // confirma acquisition_channel='Blackbox' pra essa OP. Achado por Rodrigo 2026-11-11
   // perguntando "tem certeza que o canal é leadbroker?" sobre as vendas de Leadbroker do mês.
-  { nome: normName('DLOOK BAY LOJA DANI LTDA'), canal: 'Blackbox' },
+  { nome: 'DLOOK BAY LOJA DANI LTDA', canal: 'Blackbox' },
   // Lista Fria (prospecção fria, novo canal de novembro/2026) — todos os leads caem em
   // board="Outbound" no CRM, igual Recovery, então sem override viram Recovery aqui (mesmo tipo
   // de confusão corrigido no SDR OS 2026-11-06 via acquisition_channel). closer_cockpit_calls
@@ -504,32 +504,55 @@ const CANAL_AQUISICAO_OVERRIDES = [
   // pra R.R/venda (confirmados via CRM em 2026-11-06: Ricardo Sant Anna/Tecway, Ari de
   // Souza/Gram Clip, Danton/Group Door já realizados; Marcelo Mendes/MGI, Tiago De
   // Oliveira/TDM, Profam ainda não realizados mas incluídos pra quando realizarem).
-  { nome: normName('Tecway'), canal: 'Lista Fria' },
-  { nome: normName('Gram Clip'), canal: 'Lista Fria' },
-  { nome: normName('Group Door'), canal: 'Lista Fria' },
-  { nome: normName('MGI Metalurgica'), canal: 'Lista Fria' },
-  { nome: normName('TDM Automação'), canal: 'Lista Fria' },
-  { nome: normName('Profam'), canal: 'Lista Fria' },
-  // Mais 2 de Lista Fria (mesmo padrão acima, confirmados via CRM em 2026-11-12):
-  // CORREAMAQ e Clínica Dr. Agnaldo Lima (SDR Vitor, acquisition_channel="Prospecção Fria").
-  { nome: normName('CORREAMAQ'), canal: 'Lista Fria' },
-  { nome: normName('Clinica Dr Agnaldo Lima'), canal: 'Lista Fria' },
+  { nome: 'Tecway', canal: 'Lista Fria' },
+  { nome: 'Gram Clip', canal: 'Lista Fria' },
+  { nome: 'Group Door', canal: 'Lista Fria' },
+  { nome: 'MGI Metalurgica', canal: 'Lista Fria' },
+  { nome: 'TDM Automação', canal: 'Lista Fria' },
+  { nome: 'Profam', canal: 'Lista Fria' },
+  // Mais de Lista Fria (mesmo padrão acima, confirmados via CRM em 2026-11-12): CORREAMAQ e
+  // Clínica Dr. Agnaldo Lima (SDR Vitor, acquisition_channel="Prospecção Fria"), as únicas 2
+  // já realizadas que ainda faltavam. NÃO adicionar "Fc Industrial" sozinho aqui: depois do
+  // filtro de token curto ("Fc" cai, 2 letras), sobra só a palavra genérica "industrial", que
+  // bateu por engano em "PID AUTOMAÇÃO INDUSTRIAL" (venda real de Blackbox) — bug pego e
+  // revertido no mesmo commit 2026-11-12. UNION/Libero Seguros/Fc Industrial nem precisam de
+  // override aqui: o n8n já classifica os 3 certo sozinho via acquisition_channel (conferido
+  // direto no payload ao vivo) — só R.R/Vendas (fonte sem acquisition_channel) precisariam,
+  // e nenhum dos 3 realizou ainda.
+  { nome: 'CORREAMAQ', canal: 'Lista Fria' },
+  { nome: 'Clinica Dr Agnaldo Lima', canal: 'Lista Fria' },
   // Indicação não é exclusividade do Davi: Fausto (SDR) também tem leads confirmados no CRM com
   // acquisition_channel="Indicação" (Indicação de Investidor/Parceiro) vindos do board Outbound —
   // a regra "Outbound + SDR≠Davi = Recovery" jogava esses 3 pra Recovery por engano. Rodrigo
   // perguntou 2026-11-12 "não tivemos nenhuma realizada de indicação?" e tinha razão: tinha sim,
   // 3, só contadas no canal errado. Confirmado direto no CRM (acquisition_channel) via localize_crm
   // /consultar_leads_crm — essas 3 são as únicas de Indicação-via-Fausto resolvidas em novembro.
-  { nome: normName('Arranjo Express Brasil'), canal: 'Indicação' },
-  { nome: normName('Hi-Teck Audio e Video'), canal: 'Indicação' },
-  { nome: normName('Aline Parente Psicologia'), canal: 'Indicação' },
+  { nome: 'Arranjo Express Brasil', canal: 'Indicação' },
+  { nome: 'Hi-Teck Audio e Video', canal: 'Indicação' },
+  { nome: 'Aline Parente Psicologia', canal: 'Indicação' },
 ];
+// resolveCanalOverride: mesmo bug de substring colado já corrigido em resolveByName/
+// buildNameIndex (2026-11-11, caso Leadbroker) encontrado aqui também em 2026-11-12 — "iTeck"
+// (empresa real, canal Blackbox) batia em "Hi-Teck Audio e Video" (override pra Indicação) só
+// porque "iteck" é substring literal de "hiteckaudioevideo" (hyphen removido, tudo colado).
+// Troca pra comparação por TOKEN inteiro (reaproveita normNameTokens/tokensQualify já definidos
+// acima pro mesmo propósito em resolveByName), nunca mais por string colada.
+const CANAL_OVERRIDES_TOKENS = CANAL_AQUISICAO_OVERRIDES
+  .map(o => ({ tokens: normNameTokens(o.nome), canal: o.canal }))
+  .filter(o => tokensQualify(o.tokens));
+function resolveCanalOverride(empresa) {
+  const queryTokens = normNameTokens(empresa);
+  if (!tokensQualify(queryTokens)) return null;
+  const qSet = new Set(queryTokens);
+  const hit = CANAL_OVERRIDES_TOKENS.find(o => {
+    const cSet = new Set(o.tokens);
+    return o.tokens.every(t => qSet.has(t)) || queryTokens.every(t => cSet.has(t));
+  });
+  return hit ? hit.canal : null;
+}
 function canal5(row, leadsCanalIndex) {
-  const empresaNorm = normName(row.empresa);
-  if (empresaNorm) {
-    const override = CANAL_AQUISICAO_OVERRIDES.find(o => empresaNorm.includes(o.nome) || o.nome.includes(empresaNorm));
-    if (override) return override.canal;
-  }
+  const override = resolveCanalOverride(row.empresa);
+  if (override) return override;
   if (isVitor(row)) return 'Recovery';
   if (row.canal === 'Recomendação' || row.canal === 'Recomendacao') return 'Recomendação';
   // Outbound só é "Indicação" pro Davi — pra qualquer outro SDR (incluindo fora do roster,
@@ -604,6 +627,9 @@ export default async function handler(req, res) {
       // acima. Se falhar, cai pro cálculo antigo via sdrOsLive.meetings (nunca quebra a página).
       fetchReunioesFuturas().catch(() => null),
     ]);
+    // sdrOsMeetings: movido pra cá (era declarado só perto do cálculo de R.F, bem mais abaixo)
+    // porque a correção de R.M por canal (rmOverrideDelta, mais abaixo) também precisa dela.
+    const sdrOsMeetings = (sdrOsLive && Array.isArray(sdrOsLive.meetings)) ? sdrOsLive.meetings : [];
     const leadsCanalIndex = buildNameIndex(leadsRows, 'canal_aquisicao');
     const leadsTierIndex = buildNameIndex(leadsRows, 'tier_lp');
     const canalLeadsRmAgg = leadsRmByCanal(leadsRows, competencia);
@@ -693,6 +719,22 @@ export default async function handler(req, res) {
     // Meta de leads por canal (sdr_os_targets, via SDR OS) e Projetado (meta × dias úteis
     // decorridos/total) — pedido por Rodrigo 2026-10-13 pro drill-down do card "Leads".
     const leadsPaceFrac = PACE.du / PACE.duTotal;
+    // rmOverrideDelta: aplica CANAL_AQUISICAO_OVERRIDES no R.M por canal também, não só em R.R/
+    // Vendas. sdrOsChannelAgg[k].rm vem pronto do payload do SDR OS (canonicalChannel lá dentro),
+    // que tem o MESMO problema do board+SDR (Outbound sem Davi = Recovery, mesmo quando o CRM diz
+    // Indicação) — Rodrigo pegou isso 2026-11-12 ("Indicação... na verdade tem" marcada). Como
+    // channels[].rm é só um agregado (sem nome de empresa pra corrigir ali), recalcula a
+    // CORREÇÃO a partir de sdrOsLive.meetings (que tem nome de empresa) comparando o canal que o
+    // n8n deu com o override confirmado, e desloca a diferença de um canal pro outro. rmDate já é
+    // a data real da marcação (corrigido 2026-11-11) — filtrar por ela bate exato com team.rm.
+    const rmOverrideDelta = {};
+    sdrOsMeetings.forEach(m => {
+      if (!String(m.rmDate || '').startsWith(competencia)) return;
+      const override = resolveCanalOverride(m.company);
+      if (!override || override === m.channel) return;
+      rmOverrideDelta[m.channel] = (rmOverrideDelta[m.channel] || 0) - 1;
+      rmOverrideDelta[override] = (rmOverrideDelta[override] || 0) + 1;
+    });
     const canais = canal5Keys.map(k => {
       const rr = rrByCanal5.filter(r => r.__canal5 === k).length;
       const s = salesByCanal5.filter(r => r.__canal5 === k);
@@ -727,7 +769,9 @@ export default async function handler(req, res) {
       const rmMeta = liveAgg && liveAgg.rmMeta != null ? liveAgg.rmMeta : null;
       const rrMeta = liveAgg && liveAgg.rrMeta != null ? liveAgg.rrMeta : null;
       const vendasMeta = liveAgg && liveAgg.salesMeta != null ? liveAgg.salesMeta : null;
-      return { nome: k, cor: CANAL5_COLOR[k] || 'var(--muted)', leads: agg ? agg.leads : null, rm: agg ? agg.rm : null, rr,
+      const rmBase = agg ? agg.rm : null;
+      const rm = rmBase != null ? Math.max(0, rmBase + (rmOverrideDelta[k] || 0)) : (rmOverrideDelta[k] || null);
+      return { nome: k, cor: CANAL5_COLOR[k] || 'var(--muted)', leads: agg ? agg.leads : null, rm, rr,
         leadsMeta, leadsProjetado: projetar(leadsMeta),
         rmMeta, rmProjetado: projetar(rmMeta),
         rrMeta, rrProjetado: projetar(rrMeta),
@@ -835,7 +879,6 @@ export default async function handler(req, res) {
     // fetchReunioesFuturas acima) a partir de 2026-11-02, porque sdrOsLive.meetings estava
     // sub-contando reuniões futuras sem Closer atribuído.
     const todayStr = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' });
-    const sdrOsMeetings = (sdrOsLive && Array.isArray(sdrOsLive.meetings)) ? sdrOsLive.meetings : [];
     // R.F: lê direto a aba "Reuniões" (ver nota acima) — conta qualquer linha com R.R
     // diferente de Sim/Não (cobre "Agendada", vazio ou qualquer outro texto pendente) e data
     // (da reunião, ou na falta dela, da qualificação) >= hoje. Sem exigir Closer preenchido,
