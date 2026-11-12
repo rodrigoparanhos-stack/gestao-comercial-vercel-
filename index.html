@@ -687,9 +687,10 @@ function openCanalModal(c){
   box.innerHTML =
     '<div class="m-head"><span class="name"><span class="chip" style="display:inline-block;width:8px;height:8px;border-radius:2px;background:'+color+';margin-right:6px;"></span>'+c.nome+'</span><button class="m-close" id="canalModalClose">✕</button></div>'+
     '<div class="m-sub">Meta — alvo do mês · Projetado — cascata pelas taxas planejadas até hoje · Realizado — CRM/Conta Azul ao vivo</div>'+
-    '<table><tr><th>Indicador</th><th>Meta</th><th>Projetado</th><th>Realizado</th></tr>'+
+    '<table><tr><th>Indicador</th><th>Meta</th><th>Projetado</th><th>Realizado</th><th>% Meta</th></tr>'+
     rows.map(function(r){
-      return '<tr><td class="row-label">'+r.label+'</td><td>'+(r.meta!=null? fmt(r.meta):'—')+'</td><td>'+(r.proj!=null? fmt(r.proj):'—')+'</td><td class="row-realizado">'+fmt(r.real)+'</td></tr>';
+      var pctMeta = r.meta>0? pct(r.real/r.meta) : '—';
+      return '<tr><td class="row-label">'+r.label+'</td><td>'+(r.meta!=null? fmt(r.meta):'—')+'</td><td>'+(r.proj!=null? fmt(r.proj):'—')+'</td><td class="row-realizado">'+fmt(r.real)+'</td><td>'+pctMeta+'</td></tr>';
     }).join('')+
     '</table>';
   overlay.classList.add('open');
@@ -706,6 +707,7 @@ function renderTier(tiers){
   tiers.forEach(function(t){
     var crRm = t.leads>0? t.rm/t.leads : 0;
     var crRr = t.rm>0? t.rr/t.rm : 0;
+    var crVendas = t.rr>0? t.vendas/t.rr : 0;
     var box = document.createElement('div'); box.className='chanbox'+(t.leads===0?' empty':'');
     var color = TIER_COLOR[t.nome] || '#9C9384';
     box.innerHTML =
@@ -714,7 +716,7 @@ function renderTier(tiers){
       '<div class="fm"><span>Leads</span><b>'+fmt(t.leads)+'</b></div>'+
       '<div class="fm"><span>R.M '+(t.leads? '<span class="cr">'+pct(crRm)+'</span>':'')+'</span><b>'+fmt(t.rm)+'</b></div>'+
       '<div class="fm"><span>R.R '+(t.rm? '<span class="cr">'+pct(crRr)+'</span>':'')+'</span><b>'+fmt(t.rr)+'</b></div>'+
-      '<div class="fm"><span>Vendas</span><b>'+fmt(t.vendas)+'</b></div>';
+      '<div class="fm"><span>Vendas '+(t.rr? '<span class="cr">'+pct(crVendas)+'</span>':'')+'</span><b>'+fmt(t.vendas)+'</b></div>';
     tierWrap.appendChild(box);
   });
 }
