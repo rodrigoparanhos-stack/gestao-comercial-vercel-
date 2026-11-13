@@ -584,10 +584,11 @@ function resolveTier(row, tierIndex) {
 
 // CHURN_M0_OVERRIDES: clientes que ativaram no mês mas cancelaram antes de fechar a
 // competência (churn ainda dentro do mês 0). Pedido por Rodrigo 2026-11-13 sobre a
-// DLOOK BAY LOJA DANI LTDA: continua contando como Ativado/R.R/venda (aconteceu), mas a
-// tabela de Vendas mostra "CHURN M0" em vez de "Ativado" e o valor recebido dela sai do
-// Caixa (dinheiro que não vai ficar em conta). Mesmo padrão de matching por token de
-// CANAL_AQUISICAO_OVERRIDES acima, pra nunca bater por substring colada.
+// DLOOK BAY LOJA DANI LTDA: a venda continua contando (aconteceu), mas o cliente NÃO conta
+// como Ativado em nenhuma métrica (Ativados, Receita M1 Ativado, Caixa, por canal/tier/closer)
+// — pedido explícito "precisa tirar a DLOOK como ativado também" depois de já ter saído do
+// Caixa. A tabela de Vendas mostra "CHURN M0" em vermelho em vez de "Ativado". Mesmo padrão de
+// matching por token de CANAL_AQUISICAO_OVERRIDES acima, pra nunca bater por substring colada.
 const CHURN_M0_OVERRIDES = [
   { nome: 'DLOOK BAY LOJA DANI LTDA' },
 ];
@@ -602,6 +603,13 @@ function isChurnM0(empresa) {
     const cSet = new Set(tokens);
     return tokens.every(t => qSet.has(t)) || queryTokens.every(t => cSet.has(t));
   });
+}
+// isAtivado: substitui toda checagem "r.ativado === 'SIM'" feita sobre uma linha de venda —
+// nunca considera Ativado um CHURN_M0_OVERRIDES, mesmo que o campo bruto da planilha diga SIM.
+// Não usar dentro do cálculo de m1TotalBruto (Caixa): esse já desconta o recebido do churn
+// separadamente via churnM0Recebido, então aplicar isAtivado ali subtrairia em dobro.
+function isAtivado(r) {
+  return r.ativado === 'SIM' && !isChurnM0(r.empresa);
 }
 
 function money1(n) { return n; }
@@ -680,8 +688,8 @@ export default async function handler(req, res) {
       const mySales = salesMonth.filter(r => r.closer === name);
       const vendas = mySales.length;
       const vendida = mySales.reduce((a, r) => a + toNum(r.receita_m1), 0);
-      const ativ = mySales.filter(r => r.ativado === 'SIM').length;
-      const m1 = mySales.filter(r => r.ativado === 'SIM').reduce((a, r) => a + receitaAtivadaValor(r), 0);
+      const ativ = mySales.filter(r => isAtivado(r)).length;
+      const m1 = mySales.filter(r => isAtivado(r)).reduce((a, r) => a + receitaAtivadaValor(r), 0);
       const meta = metasMonth.find(m => m.closer === name) || {};
       return {
         nome: closerLabel[name], rr, rrMeta: toNum(meta.meta_rr),
@@ -700,11 +708,11 @@ export default async function handler(req, res) {
       ? Object.keys(byCloserSnapshot).filter(k => !closerNames.includes(k)).reduce((a, k) => a + toNum(byCloserSnapshot[k].rr), 0)
       : outrosRR.length;
     if (outrosRRCountCloser || outrosSales.length) {
-      const ativ = outrosSales.filter(r => r.ativado === 'SIM').length;
+      const ativ = outrosSales.filter(r => isAtivado(r)).length;
       closers.push({
         nome: 'Outros', rr: outrosRRCountCloser, rrMeta: 0,
         ativ, ativMeta: 0,
-        m1: outrosSales.filter(r => r.ativado === 'SIM').reduce((a, r) => a + receitaAtivadaValor(r), 0), m1Meta: 0,
+        m1: outrosSales.filter(r => isAtivado(r)).reduce((a, r) => a + receitaAtivadaValor(r), 0), m1Meta: 0,
         vendas: outrosSales.length, vendida: outrosSales.reduce((a, r) => a + toNum(r.receita_m1), 0), vendasMeta: 0,
         outros: true,
       });
@@ -768,7 +776,7 @@ export default async function handler(req, res) {
     const canais = canal5Keys.map(k => {
       const rr = rrByCanal5.filter(r => r.__canal5 === k).length;
       const s = salesByCanal5.filter(r => r.__canal5 === k);
-      const ativ = s.filter(r => r.ativado === 'SIM').length;
+      const ativ = s.filter(r => isAtivado(r)).length;
       // Leadbroker é exceção à regra "preferir sempre o SDR OS" acima: o SDR OS conta Leads/R.M
       // de Inbound numa query agregada por SDR (by_sdr) que nunca teve granularidade de canal -
       // todo lead de Leadbroker sempre caía dentro de Blackbox lá (Leadbroker sempre mostrava 0,
@@ -807,7 +815,7 @@ export default async function handler(req, res) {
         rrMeta, rrProjetado: projetar(rrMeta),
         vendasMeta, vendasProjetado: projetar(vendasMeta),
         vendas: s.length, ativ, receita: s.reduce((a, r) => a + toNum(r.receita_m1), 0),
-        receitaAtiv: s.filter(r => r.ativado === 'SIM').reduce((a, r) => a + receitaAtivadaValor(r), 0),
+        receitaAtiv: s.filter(r => isAtivado(r)).reduce((a, r) => a + receitaAtivadaValor(r), 0),
         // Saber/Ter/Executar vendido por canal — pedido por Rodrigo 2026-10-02 (indicador
         // completo por canal). Soma direto dos componentes de cada venda já classificada no
         // canal certo (mesmo canal5() usado em todo o resto da página, overrides inclusos).
@@ -831,11 +839,11 @@ export default async function handler(req, res) {
     const tiers = tierOrder.map(k => {
       const rr = rrByCanal5.filter(r => r.__tier === k).length;
       const s = salesByCanal5.filter(r => r.__tier === k);
-      const ativ = s.filter(r => r.ativado === 'SIM').length;
+      const ativ = s.filter(r => isAtivado(r)).length;
       const agg = tierLeadsRmAgg[k];
       return { nome: tierLabel[k], cor: tierCores[k], leads: agg ? agg.leads : null, rm: agg ? agg.rm : null, rr,
         vendas: s.length, ativ, receita: s.reduce((a, r) => a + toNum(r.receita_m1), 0),
-        receitaAtiv: s.filter(r => r.ativado === 'SIM').reduce((a, r) => a + receitaAtivadaValor(r), 0),
+        receitaAtiv: s.filter(r => isAtivado(r)).reduce((a, r) => a + receitaAtivadaValor(r), 0),
         // Só Saber aqui (nunca Ter/Executar) — pedido explícito do Rodrigo pra não confundir
         // categorias de produto diferentes nessa visão pequena por tier.
         tmSaber: ticketMedioCategoria(s, 'saber').valor };
@@ -843,10 +851,10 @@ export default async function handler(req, res) {
     const rrSemTier = rrByCanal5.filter(r => !r.__tier).length;
     const vendasSemTier = salesByCanal5.filter(r => !r.__tier);
     if (rrSemTier || vendasSemTier.length) {
-      const ativSemTier = vendasSemTier.filter(r => r.ativado === 'SIM').length;
+      const ativSemTier = vendasSemTier.filter(r => isAtivado(r)).length;
       tiers.push({ nome: 'Sem tier (fonte incompleta)', cor: 'var(--muted)', leads: null, rm: null, rr: rrSemTier,
         vendas: vendasSemTier.length, ativ: ativSemTier, receita: vendasSemTier.reduce((a, r) => a + toNum(r.receita_m1), 0),
-        receitaAtiv: vendasSemTier.filter(r => r.ativado === 'SIM').reduce((a, r) => a + receitaAtivadaValor(r), 0),
+        receitaAtiv: vendasSemTier.filter(r => isAtivado(r)).reduce((a, r) => a + receitaAtivadaValor(r), 0),
         tmSaber: ticketMedioCategoria(vendasSemTier, 'saber').valor });
     }
 
@@ -862,7 +870,7 @@ export default async function handler(req, res) {
     const rrTotal = closerTotals && closerTotals.rr != null ? closerTotals.rr : rrMonth.length;
     const vendasTotal = salesMonth.length;
     const vendidaTotal = salesMonth.reduce((a, r) => a + toNum(r.receita_m1), 0);
-    const ativTotal = salesMonth.filter(r => r.ativado === 'SIM').length;
+    const ativTotal = salesMonth.filter(r => isAtivado(r)).length;
     // m1Total = Caixa (o que REALMENTE entrou no Conta Azul, parcela por parcela) — distinto de
     // Ativado (valor contratado inteiro, ver ativadoContratadoTotal abaixo). Fallback soma
     // valor_pago_conta_azul por venda (não receitaAtivadaValor, que agora é sempre o contratado).
@@ -909,7 +917,7 @@ export default async function handler(req, res) {
     }
     const receitaCategoria = {
       vendido: buildCategoria(META_RECEITA_CATEGORIA_VENDIDO, salesMonth),
-      ativado: buildCategoria(META_RECEITA_CATEGORIA_ATIVADO, salesMonth.filter(r => r.ativado === 'SIM')),
+      ativado: buildCategoria(META_RECEITA_CATEGORIA_ATIVADO, salesMonth.filter(r => isAtivado(r))),
     };
 
     // R.F (reuniões futuras) e Taxa de Show — pedidos por Rodrigo em 2026-09-21 como dois
@@ -949,7 +957,7 @@ export default async function handler(req, res) {
     // que é o RECEBIDO no Conta Azul, regra confirmada com Rodrigo em 2026-09-17). Pedido por
     // Rodrigo em 2026-09-24: mostrar os dois lado a lado no card, pequeno, pra não confundir
     // "ativado" (contrato) com "recebido" (caixa) — mesma distinção da seção 05.
-    const ativadoContratadoTotal = salesMonth.filter(r => r.ativado === 'SIM').reduce((a, r) => a + toNum(r.receita_m1), 0);
+    const ativadoContratadoTotal = salesMonth.filter(r => isAtivado(r)).reduce((a, r) => a + toNum(r.receita_m1), 0);
     // Ticket médio M1 por categoria de produto (Saber/Ter/Executar) — pedido por Rodrigo em
     // 2026-09-24, pra entender o tamanho médio de venda por linha de produto, não só o total.
     const ticketMedio = {
@@ -1146,7 +1154,7 @@ export default async function handler(req, res) {
       const statusAtivacao = snap ? snap.status_ativacao : (r.status_ativacao || (r.ativado === 'SIM' ? 'ATIVADO' : 'SEM_MATCH'));
       return {
         sdr: EMAIL_SDR[r.sdr] || null, closer: closerLabel[r.closer] || r.closer || null,
-        canal: r.__canal5, tier: r.__tier, ativado: r.ativado === 'SIM',
+        canal: r.__canal5, tier: r.__tier, ativado: isAtivado(r),
         // churnM0: cliente ativou e cancelou ainda dentro do mês (ver CHURN_M0_OVERRIDES) —
         // a tabela de Vendas mostra "CHURN M0" em vez de "Ativado" nesse caso.
         churnM0: isChurnM0(r.empresa),
@@ -1158,7 +1166,7 @@ export default async function handler(req, res) {
         canalNativo: r.canal || '',
         // Valor "de exibição" (ex.: lista de Vendas): recebido quando já ativado, contratado
         // enquanto não ativou ainda — mesma regra de receitaAtivadaValor() usada no resto da página.
-        valor: r.ativado === 'SIM' ? receitaAtivadaValor(r) : toNum(r.receita_m1),
+        valor: isAtivado(r) ? receitaAtivadaValor(r) : toNum(r.receita_m1),
         contrato, recebido, forma, parcelas, installments, statusAtivacao,
         // Decomposição por categoria de produto do mesmo contrato (um contrato pode ter valor em
         // mais de uma categoria ao mesmo tempo) — pedido por Rodrigo pra tabela "Vendas" da
@@ -1298,7 +1306,7 @@ export default async function handler(req, res) {
       rr: sdrOsMeetings.length ? buildDailyFromMeetings(sdrOsMeetings, 'Realizada') : buildDaily(rrMonth, 'data_rr'),
       noShow: buildDailyFromMeetings(sdrOsMeetings, 'No-show'),
       vendas: buildDaily(salesMonth, 'data_ganho'),
-      ativados: buildDaily(salesMonth, 'data_ganho', r => r.ativado === 'SIM'),
+      ativados: buildDaily(salesMonth, 'data_ganho', r => isAtivado(r)),
       receita: buildDailyReceitaByCanal(salesMonth),
       leads: buildDailyLeadsByCanal(leadsRows, sdrOsLive && sdrOsLive.dailyLeadsByChannel),
     };
