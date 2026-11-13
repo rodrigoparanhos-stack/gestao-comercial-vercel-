@@ -582,6 +582,28 @@ function resolveTier(row, tierIndex) {
   return TIER_LP_TO_KEY[(lp || '').toLowerCase()] || null;
 }
 
+// CHURN_M0_OVERRIDES: clientes que ativaram no mês mas cancelaram antes de fechar a
+// competência (churn ainda dentro do mês 0). Pedido por Rodrigo 2026-11-13 sobre a
+// DLOOK BAY LOJA DANI LTDA: continua contando como Ativado/R.R/venda (aconteceu), mas a
+// tabela de Vendas mostra "CHURN M0" em vez de "Ativado" e o valor recebido dela sai do
+// Caixa (dinheiro que não vai ficar em conta). Mesmo padrão de matching por token de
+// CANAL_AQUISICAO_OVERRIDES acima, pra nunca bater por substring colada.
+const CHURN_M0_OVERRIDES = [
+  { nome: 'DLOOK BAY LOJA DANI LTDA' },
+];
+const CHURN_M0_TOKENS = CHURN_M0_OVERRIDES
+  .map(o => normNameTokens(o.nome))
+  .filter(tokens => tokensQualify(tokens));
+function isChurnM0(empresa) {
+  const queryTokens = normNameTokens(empresa);
+  if (!tokensQualify(queryTokens)) return false;
+  const qSet = new Set(queryTokens);
+  return CHURN_M0_TOKENS.some(tokens => {
+    const cSet = new Set(tokens);
+    return tokens.every(t => qSet.has(t)) || queryTokens.every(t => cSet.has(t));
+  });
+}
+
 function money1(n) { return n; }
 
 export default async function handler(req, res) {
@@ -696,6 +718,14 @@ export default async function handler(req, res) {
     // ---------- CANAL (5 canais reais — ver regra de negócio em canal5() acima) ----------
     const rrByCanal5 = rrMonth.map(r => ({ ...r, __canal5: canal5(r, leadsCanalIndex), __tier: resolveTier(r, leadsTierIndex) }));
     const salesByCanal5 = salesMonth.map(r => ({ ...r, __canal5: canal5(r, leadsCanalIndex), __tier: resolveTier(r, leadsTierIndex) }));
+    // snapshotSalesById: hoisted pra cá (antes só existia perto do rawSales, bem mais abaixo)
+    // porque o ajuste de Caixa por CHURN_M0_OVERRIDES (ver churnM0Recebido perto do m1Total)
+    // também precisa do valor recebido mais preciso por venda (snapshot do Closer OS, join
+    // por sale_id) — mesmo motivo que fez sdrOsMeetings subir antes.
+    const snapshotSalesById = {};
+    if (closerSnapshot && Array.isArray(closerSnapshot.sales)) {
+      closerSnapshot.sales.forEach(s => { if (s.sale_id) snapshotSalesById[s.sale_id] = s; });
+    }
     const canal5Keys = [...CANAL5_ORDER];
     if (rrByCanal5.some(r => r.__canal5 === 'Inbound (não classificado)') || salesByCanal5.some(r => r.__canal5 === 'Inbound (não classificado)')) {
       canal5Keys.push('Inbound (não classificado)');
@@ -836,9 +866,21 @@ export default async function handler(req, res) {
     // m1Total = Caixa (o que REALMENTE entrou no Conta Azul, parcela por parcela) — distinto de
     // Ativado (valor contratado inteiro, ver ativadoContratadoTotal abaixo). Fallback soma
     // valor_pago_conta_azul por venda (não receitaAtivadaValor, que agora é sempre o contratado).
-    const m1Total = closerTotals && closerTotals.valorPagoContaAzul != null
+    const m1TotalBruto = closerTotals && closerTotals.valorPagoContaAzul != null
       ? closerTotals.valorPagoContaAzul
       : salesMonth.filter(r => r.ativado === 'SIM').reduce((a, r) => a + toNum(r.valor_pago_conta_azul), 0);
+    // churnM0Recebido: desconta do Caixa o que já entrou de clientes em CHURN_M0_OVERRIDES
+    // (ativaram e cancelaram dentro do mês — esse dinheiro não fica em conta, pedido por
+    // Rodrigo 2026-11-13 sobre a DLOOK). Usa o mesmo snap (join por sale_id) do rawSales pra
+    // pegar o valor recebido mais preciso por venda, em vez de recomputar outra fonte.
+    const churnM0Recebido = salesByCanal5
+      .filter(r => r.ativado === 'SIM' && isChurnM0(r.empresa))
+      .reduce((a, r) => {
+        const snap = snapshotSalesById[r.sale_id];
+        const recebido = snap ? (Number(snap.valor_pago_conta_azul) || 0) : toNum(r.valor_pago_conta_azul);
+        return a + recebido;
+      }, 0);
+    const m1Total = Math.max(0, m1TotalBruto - churnM0Recebido);
     const metaRRSum = metasMonth.reduce((a, m) => a + toNum(m.meta_rr), 0);
     const metaAtivSum = metasMonth.reduce((a, m) => a + toNum(m.meta_ativados), 0);
     const metaM1Sum = metasMonth.reduce((a, m) => a + toNum(m.meta_receita_m1), 0);
@@ -1088,14 +1130,9 @@ export default async function handler(req, res) {
       empresa: m.company || '', player: m.player || '', canal: m.channel || '',
       status: m.status || '', data: isoToBr_(m.date),
     }));
-    // Snapshot do Closer OS (closerSnapshot.sales) tem, por venda, valor_pago_conta_azul/
-    // forma_pagamento/qtd_parcelas_crm/installments mais confiáveis que a cópia na planilha
-    // (que fica com valor_pago_conta_azul vazio até o próximo sync — mesmo gap já usado acima
-    // pra m1Total). Join por sale_id, que é o mesmo valor nas duas fontes.
-    const snapshotSalesById = {};
-    if (closerSnapshot && Array.isArray(closerSnapshot.sales)) {
-      closerSnapshot.sales.forEach(s => { if (s.sale_id) snapshotSalesById[s.sale_id] = s; });
-    }
+    // snapshotSalesById (valor_pago_conta_azul/forma_pagamento/qtd_parcelas_crm/installments
+    // mais confiáveis que a cópia na planilha, join por sale_id) foi hoisted lá em cima, perto
+    // de salesByCanal5 — reaproveitado aqui sem reconstruir.
     const rawSales = salesByCanal5.map(r => {
       const snap = snapshotSalesById[r.sale_id];
       const contrato = toNum(r.receita_m1); // mesma definição de "valor" usada no resto da página (nunca TCV)
@@ -1110,6 +1147,9 @@ export default async function handler(req, res) {
       return {
         sdr: EMAIL_SDR[r.sdr] || null, closer: closerLabel[r.closer] || r.closer || null,
         canal: r.__canal5, tier: r.__tier, ativado: r.ativado === 'SIM',
+        // churnM0: cliente ativou e cancelou ainda dentro do mês (ver CHURN_M0_OVERRIDES) —
+        // a tabela de Vendas mostra "CHURN M0" em vez de "Ativado" nesse caso.
+        churnM0: isChurnM0(r.empresa),
         receita: toNum(r.receita_m1), data: r.data_ganho || null,
         empresa: r.empresa || '',
         // Canal nativo do CRM (Inbound/Outbound/Outros) — distinto de `canal` acima (classificação

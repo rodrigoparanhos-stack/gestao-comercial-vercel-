@@ -439,6 +439,7 @@ function openDrilldown(tabKey, iso, dayLabel){
 }
 
 function vendaStatusLabel(r){
+  if(r.churnM0) return 'CHURN M0';
   if(r.ativado) return 'Ativado';
   if(r.statusAtivacao==='EM_ABERTO') return 'Andamento';
   return 'Não';
@@ -448,7 +449,10 @@ function renderVendasTable(){
   var box = document.getElementById('vendasTable');
   var sales = (CURRENT.rawSales||[]).slice().sort(function(a,b){ return dateKey(a.data) < dateKey(b.data) ? 1 : -1; });
   var rows = sales.map(function(r){
-    return '<tr><td>'+(r.empresa||'—')+'</td><td>'+(r.closer||'—')+'</td><td>'+(r.forma||'—')+'</td><td>'+vendaStatusLabel(r)+'</td><td>'+money(r.valor)+'</td></tr>';
+    var statusCell = r.churnM0
+      ? '<span style="color:#D7263D;font-weight:700">'+vendaStatusLabel(r)+'</span>'
+      : vendaStatusLabel(r);
+    return '<tr><td>'+(r.empresa||'—')+'</td><td>'+(r.closer||'—')+'</td><td>'+(r.forma||'—')+'</td><td>'+statusCell+'</td><td>'+money(r.valor)+'</td></tr>';
   }).join('');
   box.innerHTML = '<div class="dd-head"><b>Vendas do mês ('+sales.length+')</b><button class="dd-close" data-close="vendas">fechar ✕</button></div>'+
     '<table><tr><th>Empresa</th><th>Closer</th><th>Forma de Pagamento</th><th>Pagou ou não</th><th>Valor</th></tr>'+rows+'</table>';
