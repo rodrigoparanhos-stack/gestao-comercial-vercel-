@@ -226,6 +226,7 @@
   .pmetric .mname{font-size:10px; text-transform:uppercase; letter-spacing:0.05em; color:var(--muted); font-weight:700; margin-bottom:7px;}
   .pmetric .mtrio{display:flex; justify-content:space-between; align-items:baseline; margin-bottom:6px;}
   .pmetric .mtrio .real{font-size:18px; font-weight:700; font-family:ui-monospace,monospace;}
+  .pmetric .mtrio .real .duo-sep{color:var(--muted); font-weight:400;}
   .pmetric .mtrio .rest{font-size:10.5px; color:var(--muted); text-align:right; line-height:1.5;}
   .pmetric .rest b{color:var(--ink-soft); font-family:ui-monospace,monospace;}
   .pmetric .track3{height:6px; border-radius:var(--radius-pill); background:var(--surface-muted); position:relative; overflow:hidden;}
@@ -734,8 +735,15 @@ function personCard(nome, statusCls, statusLabel, metrics){
   var body = '<div class="pbody">' + metrics.map(function(m){
     if(m.percent){
       return '<div class="pmetric"><div class="mname">'+m.name+'</div>'+
-        '<div class="mtrio"><span class="real num">'+pct(m.real)+'</span><span class="rest">R.R → Venda</span></div>'+
+        '<div class="mtrio"><span class="real num">'+pct(m.real)+'</span><span class="rest">'+(m.sub||'R.R → Venda')+'</span></div>'+
         '<div class="track3"><div class="fill3 ok" style="width:0%" data-w="'+Math.min(100,m.real*100)+'"></div></div></div>';
+    }
+    if(m.duo){
+      var idealD = m.meta*PACE;
+      var pctBarD = Math.min(100, m.real/m.meta*100);
+      return '<div class="pmetric"><div class="mname">'+m.name+'</div>'+
+        '<div class="mtrio"><span class="real num">'+fmt(m.real)+' <span class="duo-sep">|</span> '+fmt(m.real2)+'</span><span class="rest">Meta <b>'+fmt(m.meta)+'</b><br>Ideal até hoje <b>'+fmt(Math.round(idealD))+'</b></span></div>'+
+        '<div class="track3"><div class="fill3 '+statusClass(m.real,idealD)+'" style="width:0%" data-w="'+pctBarD+'"></div><div class="tick3" style="left:'+Math.min(100,idealD/m.meta*100)+'%"></div></div></div>';
     }
     if(m.noMeta){
       return '<div class="pmetric"><div class="mname">'+m.name+'</div>'+
@@ -761,10 +769,12 @@ function renderClosers(closers, totals){
     var scls = statusClass(c.rr, idealRr);
     var slabel = scls==='ok'?'No ritmo':(scls==='warn'?'Atenção':'Atrás');
     var conv = c.rr>0? c.vendas/c.rr : 0;
+    var convAtiv = c.rr>0? c.ativ/c.rr : 0;
     closerPeople.appendChild(personCard(c.nome, scls, slabel, [
       {name:'R.R', real:c.rr, meta:c.rrMeta},
-      {name:'Taxa de conversão', real:conv, percent:true},
-      {name:'Vendas', real:c.vendas, meta:c.vendasMeta},
+      {name:'Taxa de conversão', real:conv, percent:true, sub:'R.R → Venda'},
+      {name:'Vendas | Ativado', real:c.vendas, real2:c.ativ, meta:c.vendasMeta, duo:true},
+      {name:'Conversão Ativado', real:convAtiv, percent:true, sub:'R.R → Ativado'},
       {name:'Receita M1 vendida', real:c.vendida, meta:null, noMeta:true, money:true}
     ]));
   });
@@ -790,9 +800,13 @@ function renderSdrs(sdrs, totals){
   sdrPeople.innerHTML = '';
   sdrs.forEach(function(s){
     var noLeadsMeta = !s.leadsMeta;
+    var pctMarcada = s.leads>0? s.rm/s.leads : 0;
+    var pctRealizado = s.rm>0? s.rr/s.rm : 0;
     var metrics = [
       noLeadsMeta? {name:'Leads', real:s.leads, noMeta:true} : {name:'Leads', real:s.leads, meta:s.leadsMeta},
+      {name:'% Marcada', real:pctMarcada, percent:true, sub:'Leads → R.M'},
       s.rmMeta? {name:'R.M', real:s.rm, meta:s.rmMeta} : {name:'R.M', real:s.rm, noMeta:true},
+      {name:'% Realizado', real:pctRealizado, percent:true, sub:'R.M → R.R'},
       s.rrMeta? {name:'R.R', real:s.rr, meta:s.rrMeta} : {name:'R.R', real:s.rr, noMeta:true}
     ];
     var scls = s.rrMeta? statusClass(s.rr, s.rrMeta*PACE) : 'ok';
