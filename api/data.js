@@ -743,7 +743,18 @@ export default async function handler(req, res) {
     }
 
     // ---------- CANAL (5 canais reais — ver regra de negócio em canal5() acima) ----------
-    const rrByCanal5 = rrMonth.map(r => ({ ...r, __canal5: canal5(r, leadsCanalIndex), __tier: resolveTier(r, leadsTierIndex), __owner: ownerStatus_(r.event_id) }));
+    // __convertido: a PRÓPRIA linha da reunião em closer_cockpit_calls carrega o resultado dela
+    // (status_oportunidade/contrato_assinado/ativado são atualizados na mesma linha/event_id à
+    // medida que a oportunidade avança) — link 1:1 direto, sem precisar casar nome de empresa
+    // com outra planilha. Importante: isso conta "essa reunião de novembro já fechou" (visto
+    // hoje), que é diferente do "Vendas" oficial do tier (closer_cockpit_sales, por mês da
+    // VENDA, não da reunião) — uma venda de uma reunião de outubro que fechou em novembro entra
+    // no Vendas oficial de novembro mas não aqui. Os dois números são válidos, só respondem
+    // perguntas diferentes. Pedido por Rodrigo 2026-11-16 pra abrir Vendas/Conversão por status
+    // de proprietário, corrigindo a tentativa anterior (que tentava casar por nome e perdia a
+    // maioria dos casos).
+    function ganhouDeal_(r) { return r.status_oportunidade === 'Fechado/Ganho' && !isChurnM0(r.empresa); }
+    const rrByCanal5 = rrMonth.map(r => ({ ...r, __canal5: canal5(r, leadsCanalIndex), __tier: resolveTier(r, leadsTierIndex), __owner: ownerStatus_(r.event_id), __convertido: ganhouDeal_(r) }));
     const salesByCanal5 = salesMonth.map(r => ({ ...r, __canal5: canal5(r, leadsCanalIndex), __tier: resolveTier(r, leadsTierIndex) }));
     // snapshotSalesById: hoisted pra cá (antes só existia perto do rawSales, bem mais abaixo)
     // porque o ajuste de Caixa por CHURN_M0_OVERRIDES (ver churnM0Recebido perto do m1Total)
@@ -855,16 +866,23 @@ export default async function handler(req, res) {
     const tierOrder = ['tiny', 'small', 'medium', 'large', 'enterprise'];
     const tierLabel = { tiny: 'Tiny', small: 'Small', medium: 'Medium', large: 'Large', enterprise: 'Enterprise' };
     const tierCores = { tiny: 'var(--muted)', small: 'var(--care)', medium: 'var(--accent)', large: 'var(--info)', enterprise: 'var(--ink)' };
-    // proprietario_(rows): conta por status de "Quem entrou" (__owner, ver ownerStatus_ acima) —
-    // só R.R tem esse dado (é um campo da reunião, não da venda), por isso não separa Vendas por
-    // proprietário aqui. Taxa de conversão continua sendo do TIER inteiro (Vendas/R.R), igual já
-    // era mostrado — não existe join confiável reunião-por-reunião até uma venda específica
-    // (closer_cockpit_sales não tem event_id/op_id, só nome de empresa).
+    // proprietario_(rows): conta por status de "Quem entrou" (__owner, ver ownerStatus_ acima),
+    // e Vendas/Conversão de cada status via __convertido (ver ganhouDeal_ acima — resultado
+    // próprio da linha da reunião, link direto por event_id). "Vendas" aqui = reuniões DESTE
+    // mês que já fecharam (olhando hoje); o "Vendas" oficial do tier (painel principal) é por
+    // mês da VENDA, que pode vir de reunião de mês anterior — por isso os dois números podem
+    // não bater, de propósito (perguntas diferentes, ambas corretas).
     function proprietarioAgg_(rows) {
-      const comProprietario = rows.filter(r => r.__owner === 'comProprietario').length;
-      const semProprietario = rows.filter(r => r.__owner === 'semProprietario').length;
-      const semRegistro = rows.filter(r => r.__owner === 'semRegistro').length;
-      return { comProprietario, semProprietario, semRegistro };
+      function bucket(status) {
+        const r = rows.filter(x => x.__owner === status);
+        const vendas = r.filter(x => x.__convertido).length;
+        return { rr: r.length, vendas };
+      }
+      return {
+        comProprietario: bucket('comProprietario'),
+        semProprietario: bucket('semProprietario'),
+        semRegistro: bucket('semRegistro'),
+      };
     }
     const tiers = tierOrder.map(k => {
       const rrRows = rrByCanal5.filter(r => r.__tier === k);

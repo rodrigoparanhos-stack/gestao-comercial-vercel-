@@ -751,23 +751,26 @@ function openTierModal(t){
   var overlay = document.getElementById('canalModalOverlay');
   var box = document.getElementById('canalModalBox');
   var color = TIER_COLOR[t.nome] || '#9C9384';
-  var p = t.proprietario || { comProprietario:0, semProprietario:0, semRegistro:0 };
-  var total = p.comProprietario + p.semProprietario + p.semRegistro;
+  var zero = { rr:0, vendas:0 };
+  var p = t.proprietario || { comProprietario:zero, semProprietario:zero, semRegistro:zero };
+  var total = p.comProprietario.rr + p.semProprietario.rr + p.semRegistro.rr;
+  var vendasSoma = p.comProprietario.vendas + p.semProprietario.vendas + p.semRegistro.vendas;
   var pctOf = function(n){ return total>0? pct(n/total) : '—'; };
-  var conv = t.rr>0? pct(t.vendas/t.rr) : '—';
+  var convOf = function(b){ return b.rr>0? pct(b.vendas/b.rr) : '—'; };
+  var convTier = t.rr>0? pct(t.vendas/t.rr) : '—';
   var rows = [
-    { label:'Com proprietário', qtd:p.comProprietario },
-    { label:'Sem proprietário', qtd:p.semProprietario },
-    { label:'Sem registro ("Quem entrou" não preenchido)', qtd:p.semRegistro },
+    { label:'Com proprietário', b:p.comProprietario },
+    { label:'Sem proprietário', b:p.semProprietario },
+    { label:'Sem registro ("Quem entrou" não preenchido)', b:p.semRegistro },
   ];
   box.innerHTML =
     '<div class="m-head"><span class="name"><span class="chip" style="display:inline-block;width:8px;height:8px;border-radius:2px;background:'+color+';margin-right:6px;"></span>'+t.nome+'</span><button class="m-close" id="canalModalClose">✕</button></div>'+
     '<div class="m-sub">Proprietário — dono/decisor confirmado em "Quem entrou" na reunião (Closer OS) · Base: '+fmt(t.rr)+' R.R deste tier</div>'+
-    '<table><tr><th>Status</th><th>R.R</th><th>% do tier</th></tr>'+
-    rows.map(function(r){ return '<tr><td class="row-label">'+r.label+'</td><td class="row-realizado">'+fmt(r.qtd)+'</td><td>'+pctOf(r.qtd)+'</td></tr>'; }).join('')+
+    '<table><tr><th>Status</th><th>R.R</th><th>% do tier</th><th>Vendas</th><th>Tx. conversão</th></tr>'+
+    rows.map(function(r){ return '<tr><td class="row-label">'+r.label+'</td><td class="row-realizado">'+fmt(r.b.rr)+'</td><td>'+pctOf(r.b.rr)+'</td><td>'+fmt(r.b.vendas)+'</td><td>'+convOf(r.b)+'</td></tr>'; }).join('')+
     '</table>'+
-    '<div class="m-sub" style="margin-top:12px;">Taxa de conversão do tier (Vendas/R.R): <b style="color:var(--ink-soft)">'+fmt(t.vendas)+' / '+fmt(t.rr)+' = '+conv+'</b></div>'+
-    '<div class="m-sub" style="margin-top:6px; opacity:.75;">Conversão é do tier inteiro — hoje não dá pra saber qual venda específica veio de qual reunião, então não é possível repartir a conversão por com/sem proprietário.</div>';
+    '<div class="m-sub" style="margin-top:12px;">Taxa de conversão do tier inteiro (Vendas/R.R): <b style="color:var(--ink-soft)">'+fmt(t.vendas)+' / '+fmt(t.rr)+' = '+convTier+'</b></div>'+
+    '<div class="m-sub" style="margin-top:6px; opacity:.75;">Vendas aqui = reuniões DESTE tier/mês que já fecharam, olhando hoje (link direto pela própria reunião). O "'+fmt(t.vendas)+'" do tier (acima) é por mês da venda, não da reunião — pode incluir venda de reunião de mês anterior. Por isso a soma das 3 linhas ('+fmt(vendasSoma)+') não precisa bater com esse número, de propósito.</div>';
   overlay.classList.add('open');
   document.getElementById('canalModalClose').addEventListener('click', closeCanalModal);
   overlay.onclick = function(ev){ if(ev.target===overlay) closeCanalModal(); };
