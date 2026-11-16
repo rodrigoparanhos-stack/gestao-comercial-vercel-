@@ -1190,6 +1190,59 @@ export default async function handler(req, res) {
       empresa: m.company || '', player: m.player || '', canal: m.channel || '',
       status: m.status || '', data: isoToBr_(m.date),
     }));
+    // ---------- PLANILHA (R.M -> R.R -> Venda, linha a linha — pedido por Rodrigo 2026-11-16) ----------
+    // Backbone: sdrOsMeetings é a ÚNICA fonte ao vivo com as 3 fases por linha (Marcada/Realizada/
+    // No-show) e com rmDate/rrDate já resolvidos — closer_cockpit_calls (a planilha) só grava
+    // reunião já realizada, e parou de ganhar linhas novas depois da migração pro workflow BQ v3
+    // (27/10, ver nota em rrMonth acima), então não serve de backbone pra isso. Enriquece por
+    // nome de empresa contra closerSnapshot.calls (CRM ao vivo, só reuniões realizadas — por
+    // isso Closer fica "—" em Marcada/No-show: esse dado simplesmente não é exposto nessa fase
+    // por nenhuma fonte ao vivo hoje) e, quando a oportunidade já é Fechado/Ganho, contra
+    // closerSnapshot.sales pra decidir Ativado/Aberto. Nome diverge bastante entre as 2 abas do
+    // snapshot (razão social vs. fantasia, ex. "Alupi Distribuidora" vs "Alupi") — por isso usa
+    // o mesmo padrão exato+subset-de-tokens do resolveByName acima (nunca substring colada, ver
+    // bug histórico "Porte Smart"/"Suporte Smart" citado em normNameTokens). Quando nem o exato
+    // nem o subset acham a venda, marca "Ganho (verificar)" em vez de chutar — mais seguro que
+    // uma correspondência errada numa tabela que o Rodrigo vai usar pra auditar linha a linha.
+    function tokenSubsetMatch_(a, b) {
+      if (!a.length || !b.length) return false;
+      const setA = new Set(a), setB = new Set(b);
+      return a.every(t => setB.has(t)) || b.every(t => setA.has(t));
+    }
+    function matchRowByName_(empresa, rows, getEmpresa) {
+      const k = normName(empresa);
+      if (!k) return null;
+      const exact = rows.find(r => normName(getEmpresa(r)) === k);
+      if (exact) return exact;
+      const tokens = normNameTokens(empresa);
+      if (!tokens.length) return null;
+      return rows.find(r => tokenSubsetMatch_(tokens, normNameTokens(getEmpresa(r)))) || null;
+    }
+    const snapshotCalls = (closerSnapshot && Array.isArray(closerSnapshot.calls)) ? closerSnapshot.calls : [];
+    const snapshotSales = (closerSnapshot && Array.isArray(closerSnapshot.sales)) ? closerSnapshot.sales : [];
+    const rawPipeline = sdrOsMeetings.map(m => {
+      const call = matchRowByName_(m.company, snapshotCalls, c => c.empresa);
+      let venda = '—';
+      if (m.status === 'Realizada') {
+        const ganhou = !!(call && call.status_oportunidade === 'Fechado/Ganho');
+        if (ganhou) {
+          // isChurnM0/isAtivado checam pelo nome da linha de VENDA (razão social, mais completo
+          // que o nome curto do meeting feed, ex. "Dlook" aqui vs "DLOOK BAY LOJA DANI LTDA" na
+          // venda) — senão o filtro de tokens >=6 letras do isChurnM0 derruba nomes curtos à toa.
+          const sale = matchRowByName_(m.company, snapshotSales, s => s.empresa);
+          if (sale && isChurnM0(sale.empresa)) venda = 'Churn M0';
+          else if (sale) venda = isAtivado(sale) ? 'Ativado' : (sale.venda_em_aberto === 'SIM' ? 'Aberto' : 'Vendido');
+          else venda = isChurnM0(m.company) ? 'Churn M0' : 'Ganho (verificar)';
+        } else {
+          venda = 'Não';
+        }
+      }
+      return {
+        empresa: m.company || '', dataRM: isoToBr_(m.rmDate), sdr: m.player || '',
+        closer: call ? (closerLabel[call.closer] || call.closer || '—') : '—',
+        dataRR: isoToBr_(m.rrDate), status: m.status || '', canal: m.channel || '', venda,
+      };
+    });
     // snapshotSalesById (valor_pago_conta_azul/forma_pagamento/qtd_parcelas_crm/installments
     // mais confiáveis que a cópia na planilha, join por sale_id) foi hoisted lá em cima, perto
     // de salesByCanal5 — reaproveitado aqui sem reconstruir.
@@ -1430,6 +1483,7 @@ export default async function handler(req, res) {
       rawLeadsRM,
       rawLeadsCadastro,
       rawMeetingsSdrOs,
+      rawPipeline,
       activationTotals,
       ticketMedio,
       receitaCategoria,

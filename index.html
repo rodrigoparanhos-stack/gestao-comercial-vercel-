@@ -257,6 +257,28 @@
 
   .loadmsg{padding:60px 0; text-align:center; color:var(--muted); font-size:13px;}
   .errmsg{padding:16px; background:var(--danger-soft); color:var(--danger); border-radius:10px; font-size:12.5px; margin-top:14px;}
+
+  .plfilters{display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:12px;}
+  .plfilters input, .plfilters select{font:inherit; font-size:11.5px; font-weight:600; color:var(--ink-soft); background:var(--surface); border:1px solid var(--line-strong); border-radius:8px; padding:6px 10px; cursor:pointer;}
+  .plfilters input{cursor:text; min-width:160px; font-weight:400;}
+  .plfilters input::placeholder{color:var(--muted); font-weight:400;}
+  .plfilters .plcount{font-size:11px; color:var(--muted); margin-left:auto;}
+  .plfilters .plclear{font:inherit; font-size:11px; font-weight:700; color:var(--brand-red); background:none; border:none; cursor:pointer; padding:4px 2px; text-decoration:underline; text-underline-offset:2px;}
+  .pltable-wrap{overflow-x:auto; border:1px solid var(--line); border-radius:var(--radius-card);}
+  table.pltable{width:100%; border-collapse:collapse; font-size:11.5px; min-width:760px;}
+  table.pltable th{position:sticky; top:0; text-align:left; font-size:10px; text-transform:uppercase; letter-spacing:0.04em; color:var(--muted); font-weight:700; padding:9px 10px; background:var(--surface-soft); border-bottom:1px solid var(--line-strong); white-space:nowrap;}
+  table.pltable td{padding:8px 10px; border-bottom:1px solid var(--line); color:var(--ink-soft); white-space:nowrap;}
+  table.pltable tr:last-child td{border-bottom:none;}
+  table.pltable tr:hover td{background:var(--surface-soft);}
+  table.pltable td.plempresa{font-weight:700; color:var(--ink); font-family:"IBM Plex Sans",sans-serif; white-space:normal; min-width:180px;}
+  table.pltable td.pldate, table.pltable td.plname{font-family:ui-monospace,monospace;}
+  .plpill{display:inline-block; padding:2px 8px; border-radius:var(--radius-pill); font-size:10.5px; font-weight:700; white-space:nowrap;}
+  .plpill.pl-ok{background:var(--safe-soft); color:var(--safe);}
+  .plpill.pl-warn{background:var(--care-soft); color:var(--care);}
+  .plpill.pl-bad{background:var(--danger-soft); color:var(--danger);}
+  .plpill.pl-info{background:color-mix(in srgb, var(--info) 14%, transparent); color:var(--info);}
+  .plpill.pl-muted{background:var(--surface-muted); color:var(--muted);}
+  .plempty{padding:28px; text-align:center; color:var(--muted); font-size:12px;}
 </style>
 </head>
 <body>
@@ -350,6 +372,11 @@ function buildFrame(){
     '</section>'+
     '<section><div class="section-head"><span class="n">06</span><h2>Taxa de conversão · R.R → Venda</h2><p>Por Closer, ranqueado</p></div>'+
       '<div class="panel"><div class="conv-chart" id="convChart"></div></div>'+
+    '</section>'+
+    '<section><div class="section-head"><span class="n">07</span><h2>Planilha · R.M → R.R → Venda</h2><p>Uma linha por reunião do mês — filtre como numa planilha</p></div>'+
+      '<div class="plfilters" id="plFilters"></div>'+
+      '<div class="pltable-wrap"><table class="pltable" id="plTable"></table></div>'+
+      '<div class="plempty" id="plEmpty" hidden>Nenhuma linha bate com esse filtro.</div>'+
     '</section>'+
     '<div id="calloutZone"></div>'+
     '<div class="modal-overlay" id="canalModalOverlay"><div class="modal-box" id="canalModalBox"></div></div>';
@@ -890,6 +917,93 @@ function renderWeekGoal(stages, duTotal){
     (vendas!=null? '<span class="wg-stat">Vendas <b>'+fmt(vendas)+'</b></span>' : '');
 }
 
+// ---------- Planilha (seção 07) — tabela linha a linha com filtro por coluna, pedida por
+// Rodrigo pra simular a visão de pipeline do Closer OS dentro da Gestão Comercial ----------
+var plFilters = { empresa:'', sdr:'', closer:'', status:'', venda:'', canal:'' };
+var plRows = [];
+var PL_STATUS_PILL = { 'Realizada':'pl-ok', 'No-show':'pl-bad', 'Marcada':'pl-warn' };
+var PL_STATUS_LABEL = { 'Realizada':'Sim', 'No-show':'Não (no-show)', 'Marcada':'Agendada' };
+var PL_VENDA_PILL = { 'Ativado':'pl-ok', 'Aberto':'pl-warn', 'Vendido':'pl-info', 'Churn M0':'pl-bad', 'Ganho (verificar)':'pl-bad', 'Não':'pl-muted', '—':'pl-muted' };
+
+function plDistinct(field){
+  var seen = {};
+  plRows.forEach(function(r){ seen[r[field] || '—'] = true; });
+  return Object.keys(seen).sort();
+}
+function plSelect(id, label, field, selected){
+  var html = '<option value="">'+label+' (todos)</option>';
+  plDistinct(field).forEach(function(o){
+    var safe = String(o).replace(/"/g,'&quot;');
+    html += '<option value="'+safe+'"'+(o===selected?' selected':'')+'>'+o+'</option>';
+  });
+  return '<select id="pl_'+id+'">'+html+'</select>';
+}
+function buildPlFilters(){
+  var box = document.getElementById('plFilters');
+  if(!box) return;
+  box.innerHTML =
+    '<input type="text" id="pl_busca" placeholder="Buscar empresa…" value="'+plFilters.empresa.replace(/"/g,'&quot;')+'">'+
+    plSelect('sdr','SDR','sdr',plFilters.sdr)+
+    plSelect('closer','Closer','closer',plFilters.closer)+
+    plSelect('status','R.R','status',plFilters.status)+
+    plSelect('venda','Venda','venda',plFilters.venda)+
+    plSelect('canal','Canal','canal',plFilters.canal)+
+    '<button class="plclear" id="pl_clear" type="button">Limpar filtros</button>'+
+    '<span class="plcount" id="pl_count"></span>';
+  box.querySelector('#pl_busca').addEventListener('input', function(e){ plFilters.empresa = e.target.value; drawPlTable(); });
+  ['sdr','closer','status','venda','canal'].forEach(function(f){
+    box.querySelector('#pl_'+f).addEventListener('change', function(e){ plFilters[f] = e.target.value; drawPlTable(); });
+  });
+  box.querySelector('#pl_clear').addEventListener('click', function(){
+    plFilters = { empresa:'', sdr:'', closer:'', status:'', venda:'', canal:'' };
+    buildPlFilters();
+    drawPlTable();
+  });
+}
+function plPill(cls, text){ return '<span class="plpill '+(cls||'pl-muted')+'">'+text+'</span>'; }
+function drawPlTable(){
+  var table = document.getElementById('plTable');
+  var empty = document.getElementById('plEmpty');
+  var count = document.getElementById('pl_count');
+  if(!table) return;
+  var busca = plFilters.empresa.toLowerCase();
+  var rows = plRows.filter(function(r){
+    if(busca && (r.empresa||'').toLowerCase().indexOf(busca)===-1) return false;
+    if(plFilters.sdr && r.sdr !== plFilters.sdr) return false;
+    if(plFilters.closer && r.closer !== plFilters.closer) return false;
+    if(plFilters.status && r.status !== plFilters.status) return false;
+    if(plFilters.venda && r.venda !== plFilters.venda) return false;
+    if(plFilters.canal && r.canal !== plFilters.canal) return false;
+    return true;
+  }).sort(function(a,b){ return dateKey(b.dataRM||'').localeCompare(dateKey(a.dataRM||'')); });
+  if(count) count.textContent = rows.length+' de '+plRows.length+' reuniões';
+  if(!rows.length){
+    table.innerHTML = '';
+    if(empty) empty.hidden = false;
+    return;
+  }
+  if(empty) empty.hidden = true;
+  table.innerHTML =
+    '<thead><tr><th>Empresa</th><th>Data R.M</th><th>SDR</th><th>Closer</th><th>Data R.R</th><th>R.R</th><th>Venda</th></tr></thead>'+
+    '<tbody>'+rows.map(function(r){
+      return '<tr>'+
+        '<td class="plempresa">'+(r.empresa||'—')+'</td>'+
+        '<td class="pldate">'+(r.dataRM||'—')+'</td>'+
+        '<td class="plname">'+(r.sdr||'—')+'</td>'+
+        '<td class="plname">'+(r.closer||'—')+'</td>'+
+        '<td class="pldate">'+(r.dataRR||'—')+'</td>'+
+        '<td>'+plPill(PL_STATUS_PILL[r.status], PL_STATUS_LABEL[r.status]||r.status||'—')+'</td>'+
+        '<td>'+plPill(PL_VENDA_PILL[r.venda], r.venda||'—')+'</td>'+
+      '</tr>';
+    }).join('')+
+    '</tbody>';
+}
+function renderPipeline(rows){
+  plRows = rows || [];
+  buildPlFilters();
+  drawPlTable();
+}
+
 function renderAll(data){
   CURRENT = data;
   PACE = (data.pace && data.pace.duTotal)? data.pace.du/data.pace.duTotal : 0;
@@ -906,6 +1020,7 @@ function renderAll(data){
   renderClosers(data.closers, data.totals);
   renderSdrs(data.sdrs, data.totals);
   renderConvChart(data.closers);
+  renderPipeline(data.rawPipeline);
   var callout = document.getElementById('calloutZone');
   callout.innerHTML = '<div class="callout"><div class="dot"></div><p>Canal/Tier (R.M/Leads) vêm do SDR OS ao vivo; Leadbroker é separado de Blackbox via <span class="mono">acquisition_channel</span> real do CRM. Clique numa barra do gráfico de evolução diária pra ver a lista de leads/reuniões/vendas por trás do número daquele dia.</p></div>';
   var stamp = document.getElementById('footStamp');
