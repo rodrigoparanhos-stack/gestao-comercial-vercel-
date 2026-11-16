@@ -172,6 +172,11 @@
   .legendrow{display:flex; gap:18px; flex-wrap:wrap; font-size:11.5px; color:var(--muted); margin-top:12px;}
   .legendrow b{color:var(--ink-soft);}
 
+  .weekgoal{display:flex; align-items:center; gap:18px; flex-wrap:wrap; margin-top:14px; padding:12px 16px; background:var(--surface-soft); border:1px solid var(--line); border-radius:var(--radius-card);}
+  .weekgoal .wg-label{font-size:10.5px; font-weight:700; text-transform:uppercase; letter-spacing:.05em; color:var(--muted);}
+  .weekgoal .wg-stat{display:flex; align-items:baseline; gap:6px; font-size:12px; color:var(--muted);}
+  .weekgoal .wg-stat b{font-family:ui-monospace,monospace; font-size:15px; font-weight:700; color:var(--brand-red);}
+
   .callout{background:var(--ink); color:#FFFFFF; border-radius:var(--radius-panel); padding:16px 20px; display:flex; gap:12px; align-items:flex-start; margin-top:16px;}
   .callout .dot{width:9px; height:9px; border-radius:50%; background:var(--brand-red); margin-top:5px; flex:none;}
   .callout p{margin:0; color:#D9D9D9; font-size:12px; line-height:1.55;}
@@ -192,6 +197,8 @@
   .chanbox .fm{display:flex; justify-content:space-between; font-size:10.5px; color:var(--muted);}
   .chanbox .fm b{color:var(--ink-soft); font-weight:700;}
   .chanbox .fm .cr{font-size:9px; color:var(--muted); opacity:.75;}
+  .chanbox .fm.hitrate{margin-top:3px; padding-top:7px; border-top:1px dashed var(--line); font-weight:700; color:var(--ink-soft);}
+  .chanbox .fm.hitrate b{color:var(--brand-red);}
 
   /* ---- modal por canal: Meta x Projetado x Realizado ---- */
   .modal-overlay{position:fixed; inset:0; background:rgba(17,17,17,.45); z-index:200; display:none; align-items:center; justify-content:center; padding:20px;}
@@ -314,6 +321,7 @@ function buildFrame(){
     '<section><div class="section-head"><span class="n">01</span><h2>Funil do mês</h2><p>Meta · Projetado · Real, ponta a ponta</p></div>'+
       '<div class="funnelgrid" id="funnel"></div>'+
       '<div class="legendrow"><span><b>Meta</b> — alvo do mês (BP Tático)</span><span><b>Projetado</b> — cascata dos leads já recebidos pelas taxas planejadas</span><span><b>Real</b> — CRM/Conta Azul ao vivo</span></div>'+
+      '<div class="weekgoal" id="weekGoal"></div>'+
       '<div class="vendastable canaltable" id="leadsTable"></div>'+
       '<div class="vendastable" id="vendasTable"></div>'+
     '</section>'+
@@ -663,6 +671,7 @@ function renderCanal(canais){
     var crRm = c.leads>0? c.rm/c.leads : 0;
     var crRr = c.rm>0? c.rr/c.rm : 0;
     var crVendas = c.rr>0? c.vendas/c.rr : 0;
+    var hitRate = c.leads>0? c.vendas/c.leads : 0;
     var isEmpty = !c.leads && !c.rm && !c.rr && !c.vendas;
     var box = document.createElement('div'); box.className='chanbox'+(isEmpty? ' empty':'');
     var color = CANAL_COLOR[c.nome] || '#9C9384';
@@ -672,7 +681,8 @@ function renderCanal(canais){
       '<div class="fm"><span>Leads</span><b>'+fmt(c.leads)+'</b></div>'+
       '<div class="fm"><span>R.M <span class="cr">'+pct(crRm)+'</span></span><b>'+fmt(c.rm)+'</b></div>'+
       '<div class="fm"><span>R.R <span class="cr">'+pct(crRr)+'</span></span><b>'+fmt(c.rr)+'</b></div>'+
-      '<div class="fm"><span>Vendas <span class="cr">'+pct(crVendas)+'</span></span><b>'+fmt(c.vendas)+'</b></div>';
+      '<div class="fm"><span>Vendas <span class="cr">'+pct(crVendas)+'</span></span><b>'+fmt(c.vendas)+'</b></div>'+
+      '<div class="fm hitrate"><span>% Hit Rate (Vendas/Leads)</span><b>'+pct(hitRate)+'</b></div>';
     if(!isEmpty) box.addEventListener('click', function(){ openCanalModal(c); });
     canalWrap.appendChild(box);
   });
@@ -819,6 +829,30 @@ function renderSdrs(sdrs, totals){
     '<tr style="font-weight:700"><td>Total roster</td><td>'+totals.leads+'</td><td>'+totals.leadsMetaSum+'/'+totals.leadsMetaGeral+'</td><td>'+totals.rm+'</td><td>—</td><td>'+totals.rrSdr+'</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>';
 }
 
+// Meta da semana — pedido por Rodrigo pro Daily/All Hands: Marcada (R.M), Realizada (R.R) e
+// Vendas prorateadas a partir da meta do mês, na mesma lógica do "Ritmo" (dia útil/total do mês).
+// Semana padrão = 5 dias úteis (seg a sex); não desconta feriados.
+function renderWeekGoal(stages, duTotal){
+  var box = document.getElementById('weekGoal');
+  if(!box) return;
+  var byName = {};
+  stages.forEach(function(s){ byName[s.name] = s; });
+  var DIAS_UTEIS_SEMANA = 5;
+  function weekly(name){
+    var s = byName[name];
+    if(!s || s.meta==null || !duTotal) return null;
+    return Math.round(s.meta * DIAS_UTEIS_SEMANA / duTotal);
+  }
+  var marcada = weekly('R.M');
+  var realizada = weekly('R.R');
+  var vendas = weekly('Vendas');
+  box.innerHTML =
+    '<span class="wg-label">Meta da semana (5 dias úteis)</span>'+
+    (marcada!=null? '<span class="wg-stat">Marcada <b>'+fmt(marcada)+'</b></span>' : '')+
+    (realizada!=null? '<span class="wg-stat">Realizada <b>'+fmt(realizada)+'</b></span>' : '')+
+    (vendas!=null? '<span class="wg-stat">Vendas <b>'+fmt(vendas)+'</b></span>' : '');
+}
+
 function renderAll(data){
   CURRENT = data;
   PACE = (data.pace && data.pace.duTotal)? data.pace.du/data.pace.duTotal : 0;
@@ -829,6 +863,7 @@ function renderAll(data){
   buildTabs(seriesMap);
   renderChart(seriesMap, activeTab);
   renderFunnel(data.stages);
+  renderWeekGoal(data.stages, data.pace && data.pace.duTotal);
   renderCanal(data.canais);
   renderTier(data.tiers);
   renderClosers(data.closers, data.totals);
