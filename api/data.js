@@ -636,10 +636,14 @@ export default async function handler(req, res) {
     // "quentes" entre requests, então um valor calculado só na inicialização travaria no dia
     // do cold start em vez de acompanhar o dia real.
     const PACE = { du: computeDiasUteisDecorridos(competencia, metaMes.holidays), duTotal: computeTotalDiasUteis_(competencia, metaMes.holidays) };
-    const [sales, calls, metas, leadsRows, sdrOsLive, closerSnapshot, reunioesRows] = await Promise.all([
+    const [sales, calls, metas, pipelineControl, leadsRows, sdrOsLive, closerSnapshot, reunioesRows] = await Promise.all([
       fetchSheet('closer_cockpit_sales'),
       fetchSheet('closer_cockpit_calls'),
       fetchSheet('closer_cockpit_metas'),
+      // "Quem entrou" (participantes_reuniao) — mesma aba que o Closer OS usa internamente pra
+      // rr_com_proprietario (CloserSystem.gs). Pedido por Rodrigo 2026-11-16 pra abrir, ao
+      // clicar no card de Tier, o corte Com/Sem proprietário e a taxa de conversão do tier.
+      fetchSheet('closer_pipeline_control').catch(() => []),
       fetchLeadsSheet().catch(() => []), // se a planilha de leads falhar, Inbound cai todo em "não classificado" e sem Leads/R.M vivo (nunca quebra a página)
       // Payload real do SDR OS (mesma fonte que o produto SDR OS usa) — sem isso a seção
       // "Por SDR" caía pra números estáticos/derivados de outra planilha e divergia do SDR
@@ -723,8 +727,23 @@ export default async function handler(req, res) {
       m1: a.m1 + c.m1, m1Meta: a.m1Meta + c.m1Meta,
     }), { rr: 0, rrMeta: 0, vendas: 0, vendida: 0, ativ: 0, ativMeta: 0, m1: 0, m1Meta: 0 });
 
+    // ---------- PROPRIETÁRIO ("Quem entrou" na reunião) ----------
+    // closer_pipeline_control.participantes_reuniao vem normalizado em papéis canônicos
+    // (PROPRIETARIO|SOCIOS|DIRETOR|GERENTE_COORDENADOR|FDD|FUNCIONARIO, separados por "|") —
+    // mesma lista que o CloserSystem.gs usa pro indicador rr_com_proprietario. Join por
+    // event_id (chave própria da linha, sempre presente nas duas abas; lead_id/op_id não são
+    // confiáveis o bastante pra isso, ver nota do canal5() acima).
+    const participantesByEvent = {};
+    pipelineControl.forEach(r => { if (r.event_id) participantesByEvent[r.event_id] = r.participantes_reuniao || ''; });
+    function ownerStatus_(eventId) {
+      if (!Object.prototype.hasOwnProperty.call(participantesByEvent, eventId)) return 'semRegistro';
+      const p = (participantesByEvent[eventId] || '').trim();
+      if (!p) return 'semRegistro';
+      return p.toUpperCase().indexOf('PROPRIETARIO') >= 0 ? 'comProprietario' : 'semProprietario';
+    }
+
     // ---------- CANAL (5 canais reais — ver regra de negócio em canal5() acima) ----------
-    const rrByCanal5 = rrMonth.map(r => ({ ...r, __canal5: canal5(r, leadsCanalIndex), __tier: resolveTier(r, leadsTierIndex) }));
+    const rrByCanal5 = rrMonth.map(r => ({ ...r, __canal5: canal5(r, leadsCanalIndex), __tier: resolveTier(r, leadsTierIndex), __owner: ownerStatus_(r.event_id) }));
     const salesByCanal5 = salesMonth.map(r => ({ ...r, __canal5: canal5(r, leadsCanalIndex), __tier: resolveTier(r, leadsTierIndex) }));
     // snapshotSalesById: hoisted pra cá (antes só existia perto do rawSales, bem mais abaixo)
     // porque o ajuste de Caixa por CHURN_M0_OVERRIDES (ver churnM0Recebido perto do m1Total)
@@ -836,8 +855,20 @@ export default async function handler(req, res) {
     const tierOrder = ['tiny', 'small', 'medium', 'large', 'enterprise'];
     const tierLabel = { tiny: 'Tiny', small: 'Small', medium: 'Medium', large: 'Large', enterprise: 'Enterprise' };
     const tierCores = { tiny: 'var(--muted)', small: 'var(--care)', medium: 'var(--accent)', large: 'var(--info)', enterprise: 'var(--ink)' };
+    // proprietario_(rows): conta por status de "Quem entrou" (__owner, ver ownerStatus_ acima) —
+    // só R.R tem esse dado (é um campo da reunião, não da venda), por isso não separa Vendas por
+    // proprietário aqui. Taxa de conversão continua sendo do TIER inteiro (Vendas/R.R), igual já
+    // era mostrado — não existe join confiável reunião-por-reunião até uma venda específica
+    // (closer_cockpit_sales não tem event_id/op_id, só nome de empresa).
+    function proprietarioAgg_(rows) {
+      const comProprietario = rows.filter(r => r.__owner === 'comProprietario').length;
+      const semProprietario = rows.filter(r => r.__owner === 'semProprietario').length;
+      const semRegistro = rows.filter(r => r.__owner === 'semRegistro').length;
+      return { comProprietario, semProprietario, semRegistro };
+    }
     const tiers = tierOrder.map(k => {
-      const rr = rrByCanal5.filter(r => r.__tier === k).length;
+      const rrRows = rrByCanal5.filter(r => r.__tier === k);
+      const rr = rrRows.length;
       const s = salesByCanal5.filter(r => r.__tier === k);
       const ativ = s.filter(r => isAtivado(r)).length;
       const agg = tierLeadsRmAgg[k];
@@ -846,16 +877,19 @@ export default async function handler(req, res) {
         receitaAtiv: s.filter(r => isAtivado(r)).reduce((a, r) => a + receitaAtivadaValor(r), 0),
         // Só Saber aqui (nunca Ter/Executar) — pedido explícito do Rodrigo pra não confundir
         // categorias de produto diferentes nessa visão pequena por tier.
-        tmSaber: ticketMedioCategoria(s, 'saber').valor };
+        tmSaber: ticketMedioCategoria(s, 'saber').valor,
+        proprietario: proprietarioAgg_(rrRows) };
     });
-    const rrSemTier = rrByCanal5.filter(r => !r.__tier).length;
+    const rrSemTierRows = rrByCanal5.filter(r => !r.__tier);
+    const rrSemTier = rrSemTierRows.length;
     const vendasSemTier = salesByCanal5.filter(r => !r.__tier);
     if (rrSemTier || vendasSemTier.length) {
       const ativSemTier = vendasSemTier.filter(r => isAtivado(r)).length;
       tiers.push({ nome: 'Sem tier (fonte incompleta)', cor: 'var(--muted)', leads: null, rm: null, rr: rrSemTier,
         vendas: vendasSemTier.length, ativ: ativSemTier, receita: vendasSemTier.reduce((a, r) => a + toNum(r.receita_m1), 0),
         receitaAtiv: vendasSemTier.filter(r => isAtivado(r)).reduce((a, r) => a + receitaAtivadaValor(r), 0),
-        tmSaber: ticketMedioCategoria(vendasSemTier, 'saber').valor });
+        tmSaber: ticketMedioCategoria(vendasSemTier, 'saber').valor,
+        proprietario: proprietarioAgg_(rrSemTierRows) });
     }
 
     // ---------- FUNIL ----------
