@@ -258,12 +258,9 @@
   .loadmsg{padding:60px 0; text-align:center; color:var(--muted); font-size:13px;}
   .errmsg{padding:16px; background:var(--danger-soft); color:var(--danger); border-radius:10px; font-size:12.5px; margin-top:14px;}
 
-  .plfilters{display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:12px;}
-  .plfilters input, .plfilters select{font:inherit; font-size:11.5px; font-weight:600; color:var(--ink-soft); background:var(--surface); border:1px solid var(--line-strong); border-radius:8px; padding:6px 10px; cursor:pointer;}
-  .plfilters input{cursor:text; min-width:160px; font-weight:400;}
-  .plfilters input::placeholder{color:var(--muted); font-weight:400;}
-  .plfilters .plcount{font-size:11px; color:var(--muted); margin-left:auto;}
-  .plfilters .plclear{font:inherit; font-size:11px; font-weight:700; color:var(--brand-red); background:none; border:none; cursor:pointer; padding:4px 2px; text-decoration:underline; text-underline-offset:2px;}
+  .plfilters{display:flex; align-items:center; gap:10px; margin-bottom:10px; min-height:16px;}
+  .plfilters .plcount{font-size:11px; color:var(--muted);}
+  .plfilters .plclear{font:inherit; font-size:11px; font-weight:700; color:var(--brand-red); background:none; border:none; cursor:pointer; padding:0; text-decoration:underline; text-underline-offset:2px;}
   .pltable-wrap{overflow-x:auto; border:1px solid var(--line); border-radius:var(--radius-card);}
   table.pltable{width:100%; border-collapse:collapse; font-size:11.5px; min-width:760px;}
   table.pltable th{position:sticky; top:0; text-align:left; font-size:10px; text-transform:uppercase; letter-spacing:0.04em; color:var(--muted); font-weight:700; padding:9px 10px; background:var(--surface-soft); border-bottom:1px solid var(--line-strong); white-space:nowrap;}
@@ -272,6 +269,9 @@
   table.pltable tr:hover td{background:var(--surface-soft);}
   table.pltable td.plempresa{font-weight:700; color:var(--ink); font-family:"IBM Plex Sans",sans-serif; white-space:normal; min-width:180px;}
   table.pltable td.pldate, table.pltable td.plname{font-family:ui-monospace,monospace;}
+  .plfilterbtn{font:inherit; font-size:10px; border:none; background:none; color:var(--muted); cursor:pointer; padding:1px 3px; border-radius:4px; vertical-align:middle;}
+  .plfilterbtn:hover{background:var(--surface-muted); color:var(--ink-soft);}
+  .plfilterbtn.active{color:#fff; background:var(--brand-red);}
   .plpill{display:inline-block; padding:2px 8px; border-radius:var(--radius-pill); font-size:10.5px; font-weight:700; white-space:nowrap;}
   .plpill.pl-ok{background:var(--safe-soft); color:var(--safe);}
   .plpill.pl-warn{background:var(--care-soft); color:var(--care);}
@@ -279,6 +279,20 @@
   .plpill.pl-info{background:color-mix(in srgb, var(--info) 14%, transparent); color:var(--info);}
   .plpill.pl-muted{background:var(--surface-muted); color:var(--muted);}
   .plempty{padding:28px; text-align:center; color:var(--muted); font-size:12px;}
+  .plpop{position:fixed; z-index:200; width:230px; background:var(--surface); border:1px solid var(--line-strong); border-radius:10px; box-shadow:0 14px 34px rgba(0,0,0,.18); padding:10px; font-size:12px;}
+  .plpop-search{width:100%; box-sizing:border-box; font:inherit; font-size:11.5px; border:1px solid var(--line-strong); border-radius:7px; padding:6px 8px; margin-bottom:8px;}
+  .plpop-actions{display:flex; gap:10px; margin-bottom:6px;}
+  .plpop-actions button{font:inherit; font-size:10.5px; font-weight:700; color:var(--info); background:none; border:none; cursor:pointer; padding:0; text-decoration:underline; text-underline-offset:2px;}
+  .plpop-list{max-height:220px; overflow-y:auto; border-top:1px solid var(--line); border-bottom:1px solid var(--line); padding:4px 0; margin-bottom:8px;}
+  .plpop-item{display:flex; align-items:center; gap:7px; padding:4px 2px; cursor:pointer; font-size:11.5px; color:var(--ink-soft);}
+  .plpop-item:hover{background:var(--surface-soft);}
+  .plpop-item input{flex:none; margin:0;}
+  .plpop-item span{flex:1; white-space:normal; word-break:break-word;}
+  .plpop-item i{flex:none; font-style:normal; color:var(--muted); font-size:10px;}
+  .plpop-empty{padding:10px 4px; color:var(--muted); font-size:11px; text-align:center;}
+  .plpop-foot{display:flex; justify-content:flex-end; gap:8px;}
+  .plpop-foot button{font:inherit; font-size:11px; font-weight:700; border-radius:7px; padding:5px 12px; cursor:pointer; border:1px solid var(--line-strong); background:var(--surface);}
+  .plpop-foot .plpop-ok{background:var(--ink); color:#fff; border-color:var(--ink);}
 </style>
 </head>
 <body>
@@ -917,90 +931,148 @@ function renderWeekGoal(stages, duTotal){
     (vendas!=null? '<span class="wg-stat">Vendas <b>'+fmt(vendas)+'</b></span>' : '');
 }
 
-// ---------- Planilha (seção 07) — tabela linha a linha com filtro por coluna, pedida por
-// Rodrigo pra simular a visão de pipeline do Closer OS dentro da Gestão Comercial ----------
-var plFilters = { empresa:'', sdr:'', closer:'', status:'', venda:'', canal:'' };
+// ---------- Planilha (seção 07) — tabela linha a linha com filtro por coluna estilo Excel
+// (clica na seta do cabeçalho, marca/desmarca valores) — pedida por Rodrigo pra simular a
+// visão de pipeline do Closer OS dentro da Gestão Comercial ----------
 var plRows = [];
+var plColumnFilters = {}; // key -> Set de valores permitidos, ou ausente/null = sem filtro
+var plOpenPopover = null; // {key, el}
 var PL_STATUS_PILL = { 'Realizada':'pl-ok', 'No-show':'pl-bad', 'Marcada':'pl-warn' };
 var PL_STATUS_LABEL = { 'Realizada':'Sim', 'No-show':'Não (no-show)', 'Marcada':'Agendada' };
 var PL_VENDA_PILL = { 'Ativado':'pl-ok', 'Aberto':'pl-warn', 'Vendido':'pl-info', 'Churn M0':'pl-bad', 'Ganho (verificar)':'pl-bad', 'Não':'pl-muted', '—':'pl-muted' };
+var PL_COLUMNS = [
+  { key:'empresa', label:'Empresa', cls:'plempresa' },
+  { key:'dataRM', label:'Data R.M', cls:'pldate' },
+  { key:'sdr', label:'SDR', cls:'plname' },
+  { key:'closer', label:'Closer', cls:'plname' },
+  { key:'dataRR', label:'Data R.R', cls:'pldate' },
+  { key:'status', label:'R.R', valueLabel:function(v){ return PL_STATUS_LABEL[v]||v; }, render:function(r){ return plPill(PL_STATUS_PILL[r.status], PL_STATUS_LABEL[r.status]||r.status||'—'); } },
+  { key:'venda', label:'Venda', render:function(r){ return plPill(PL_VENDA_PILL[r.venda], r.venda||'—'); } },
+];
+function plPill(cls, text){ return '<span class="plpill '+(cls||'pl-muted')+'">'+text+'</span>'; }
+function plValueLabel(col, v){ v = v || '—'; return col.valueLabel ? col.valueLabel(v) : v; }
+// Mesma lógica do Excel: as opções de UMA coluna já descontam os filtros ativos nas OUTRAS
+// (exceptKey), senão marcar um filtro escondia as opções que ele mesmo deveria oferecer.
+function plRowPassesFilters(r, exceptKey){
+  return PL_COLUMNS.every(function(col){
+    if(col.key===exceptKey) return true;
+    var set = plColumnFilters[col.key];
+    return !set || set.has(r[col.key] || '—');
+  });
+}
+function plClosePopover(){
+  if(plOpenPopover && plOpenPopover.el && plOpenPopover.el.parentNode) plOpenPopover.el.parentNode.removeChild(plOpenPopover.el);
+  plOpenPopover = null;
+  document.removeEventListener('mousedown', plOutsideHandler, true);
+  document.removeEventListener('keydown', plEscHandler, true);
+}
+function plOutsideHandler(e){ if(plOpenPopover && !plOpenPopover.el.contains(e.target)) plClosePopover(); }
+function plEscHandler(e){ if(e.key==='Escape') plClosePopover(); }
+function plOpenPopoverFor(col, btn){
+  if(plOpenPopover && plOpenPopover.key===col.key){ plClosePopover(); return; }
+  plClosePopover();
+  var base = plRows.filter(function(r){ return plRowPassesFilters(r, col.key); });
+  var counts = {};
+  base.forEach(function(r){ var v = r[col.key] || '—'; counts[v] = (counts[v]||0)+1; });
+  var values = Object.keys(counts).sort(function(a,b){ return plValueLabel(col,a).localeCompare(plValueLabel(col,b),'pt-BR'); });
+  var current = plColumnFilters[col.key];
+  var checked = {};
+  values.forEach(function(v){ checked[v] = current ? current.has(v) : true; });
 
-function plDistinct(field){
-  var seen = {};
-  plRows.forEach(function(r){ seen[r[field] || '—'] = true; });
-  return Object.keys(seen).sort();
-}
-function plSelect(id, label, field, selected){
-  var html = '<option value="">'+label+' (todos)</option>';
-  plDistinct(field).forEach(function(o){
-    var safe = String(o).replace(/"/g,'&quot;');
-    html += '<option value="'+safe+'"'+(o===selected?' selected':'')+'>'+o+'</option>';
-  });
-  return '<select id="pl_'+id+'">'+html+'</select>';
-}
-function buildPlFilters(){
-  var box = document.getElementById('plFilters');
-  if(!box) return;
-  box.innerHTML =
-    '<input type="text" id="pl_busca" placeholder="Buscar empresa…" value="'+plFilters.empresa.replace(/"/g,'&quot;')+'">'+
-    plSelect('sdr','SDR','sdr',plFilters.sdr)+
-    plSelect('closer','Closer','closer',plFilters.closer)+
-    plSelect('status','R.R','status',plFilters.status)+
-    plSelect('venda','Venda','venda',plFilters.venda)+
-    plSelect('canal','Canal','canal',plFilters.canal)+
-    '<button class="plclear" id="pl_clear" type="button">Limpar filtros</button>'+
-    '<span class="plcount" id="pl_count"></span>';
-  box.querySelector('#pl_busca').addEventListener('input', function(e){ plFilters.empresa = e.target.value; drawPlTable(); });
-  ['sdr','closer','status','venda','canal'].forEach(function(f){
-    box.querySelector('#pl_'+f).addEventListener('change', function(e){ plFilters[f] = e.target.value; drawPlTable(); });
-  });
-  box.querySelector('#pl_clear').addEventListener('click', function(){
-    plFilters = { empresa:'', sdr:'', closer:'', status:'', venda:'', canal:'' };
-    buildPlFilters();
+  var pop = document.createElement('div');
+  pop.className = 'plpop';
+  pop.innerHTML =
+    '<input type="text" class="plpop-search" placeholder="Buscar…">'+
+    '<div class="plpop-actions"><button type="button" data-act="all">Selecionar tudo</button><button type="button" data-act="none">Limpar</button></div>'+
+    '<div class="plpop-list"></div>'+
+    '<div class="plpop-foot"><button type="button" class="plpop-cancel">Cancelar</button><button type="button" class="plpop-ok">OK</button></div>';
+  document.body.appendChild(pop);
+
+  function renderList(filterText){
+    var list = pop.querySelector('.plpop-list');
+    var ft = (filterText||'').toLowerCase();
+    var vis = values.filter(function(v){ return plValueLabel(col,v).toLowerCase().indexOf(ft)!==-1; });
+    list.innerHTML = vis.length ? vis.map(function(v){
+      var safe = v.replace(/"/g,'&quot;');
+      return '<label class="plpop-item"><input type="checkbox" value="'+safe+'"'+(checked[v]?' checked':'')+'><span>'+plValueLabel(col,v)+'</span><i>'+counts[v]+'</i></label>';
+    }).join('') : '<div class="plpop-empty">Nada encontrado</div>';
+    list.querySelectorAll('input[type=checkbox]').forEach(function(cb){
+      cb.addEventListener('change', function(){ checked[cb.value] = cb.checked; });
+    });
+  }
+  renderList('');
+  pop.querySelector('.plpop-search').addEventListener('input', function(e){ renderList(e.target.value); });
+  pop.querySelector('[data-act="all"]').addEventListener('click', function(){ values.forEach(function(v){ checked[v]=true; }); renderList(pop.querySelector('.plpop-search').value); });
+  pop.querySelector('[data-act="none"]').addEventListener('click', function(){ values.forEach(function(v){ checked[v]=false; }); renderList(pop.querySelector('.plpop-search').value); });
+  pop.querySelector('.plpop-cancel').addEventListener('click', plClosePopover);
+  pop.querySelector('.plpop-ok').addEventListener('click', function(){
+    var selected = values.filter(function(v){ return checked[v]; });
+    plColumnFilters[col.key] = selected.length === values.length ? null : new Set(selected);
+    plClosePopover();
     drawPlTable();
   });
+
+  var r = btn.getBoundingClientRect();
+  pop.style.top = (r.bottom+4)+'px';
+  pop.style.left = r.left+'px';
+  requestAnimationFrame(function(){
+    var pw = pop.offsetWidth, ph = pop.offsetHeight;
+    if(r.left+pw > window.innerWidth-8) pop.style.left = Math.max(8, window.innerWidth-pw-8)+'px';
+    if(r.bottom+4+ph > window.innerHeight-8) pop.style.top = Math.max(8, r.top-ph-4)+'px';
+  });
+  plOpenPopover = { key: col.key, el: pop };
+  setTimeout(function(){
+    document.addEventListener('mousedown', plOutsideHandler, true);
+    document.addEventListener('keydown', plEscHandler, true);
+    var search = pop.querySelector('.plpop-search');
+    if(search) search.focus();
+  }, 0);
 }
-function plPill(cls, text){ return '<span class="plpill '+(cls||'pl-muted')+'">'+text+'</span>'; }
+function buildPlHeader(){
+  var table = document.getElementById('plTable');
+  if(!table) return;
+  table.innerHTML = '<thead><tr>'+PL_COLUMNS.map(function(col){
+    return '<th>'+col.label+' <button type="button" class="plfilterbtn" data-col="'+col.key+'">▾</button></th>';
+  }).join('')+'</tr></thead><tbody></tbody>';
+  table.querySelectorAll('.plfilterbtn').forEach(function(btn){
+    btn.addEventListener('click', function(e){
+      e.stopPropagation();
+      var col = PL_COLUMNS.filter(function(c){ return c.key===btn.getAttribute('data-col'); })[0];
+      plOpenPopoverFor(col, btn);
+    });
+  });
+}
 function drawPlTable(){
   var table = document.getElementById('plTable');
   var empty = document.getElementById('plEmpty');
-  var count = document.getElementById('pl_count');
   if(!table) return;
-  var busca = plFilters.empresa.toLowerCase();
-  var rows = plRows.filter(function(r){
-    if(busca && (r.empresa||'').toLowerCase().indexOf(busca)===-1) return false;
-    if(plFilters.sdr && r.sdr !== plFilters.sdr) return false;
-    if(plFilters.closer && r.closer !== plFilters.closer) return false;
-    if(plFilters.status && r.status !== plFilters.status) return false;
-    if(plFilters.venda && r.venda !== plFilters.venda) return false;
-    if(plFilters.canal && r.canal !== plFilters.canal) return false;
-    return true;
-  }).sort(function(a,b){ return dateKey(b.dataRM||'').localeCompare(dateKey(a.dataRM||'')); });
-  if(count) count.textContent = rows.length+' de '+plRows.length+' reuniões';
+  table.querySelectorAll('.plfilterbtn').forEach(function(btn){
+    btn.classList.toggle('active', !!plColumnFilters[btn.getAttribute('data-col')]);
+  });
+  var rows = plRows.filter(function(r){ return plRowPassesFilters(r, null); })
+    .sort(function(a,b){ return dateKey(b.dataRM||'').localeCompare(dateKey(a.dataRM||'')); });
+  var tbody = table.querySelector('tbody');
+  var box = document.getElementById('plFilters');
+  if(box) box.innerHTML = '<span class="plcount">'+rows.length+' de '+plRows.length+' reuniões</span>'+
+    (Object.keys(plColumnFilters).some(function(k){ return plColumnFilters[k]; }) ? '<button class="plclear" id="pl_clear" type="button">Limpar filtros</button>' : '');
+  if(box && box.querySelector('#pl_clear')) box.querySelector('#pl_clear').addEventListener('click', function(){ plColumnFilters = {}; drawPlTable(); });
+  if(!tbody) return;
   if(!rows.length){
-    table.innerHTML = '';
+    tbody.innerHTML = '';
     if(empty) empty.hidden = false;
     return;
   }
   if(empty) empty.hidden = true;
-  table.innerHTML =
-    '<thead><tr><th>Empresa</th><th>Data R.M</th><th>SDR</th><th>Closer</th><th>Data R.R</th><th>R.R</th><th>Venda</th></tr></thead>'+
-    '<tbody>'+rows.map(function(r){
-      return '<tr>'+
-        '<td class="plempresa">'+(r.empresa||'—')+'</td>'+
-        '<td class="pldate">'+(r.dataRM||'—')+'</td>'+
-        '<td class="plname">'+(r.sdr||'—')+'</td>'+
-        '<td class="plname">'+(r.closer||'—')+'</td>'+
-        '<td class="pldate">'+(r.dataRR||'—')+'</td>'+
-        '<td>'+plPill(PL_STATUS_PILL[r.status], PL_STATUS_LABEL[r.status]||r.status||'—')+'</td>'+
-        '<td>'+plPill(PL_VENDA_PILL[r.venda], r.venda||'—')+'</td>'+
-      '</tr>';
-    }).join('')+
-    '</tbody>';
+  tbody.innerHTML = rows.map(function(r){
+    return '<tr>'+PL_COLUMNS.map(function(col){
+      return '<td class="'+(col.cls||'')+'">'+(col.render ? col.render(r) : (r[col.key]||'—'))+'</td>';
+    }).join('')+'</tr>';
+  }).join('');
 }
 function renderPipeline(rows){
   plRows = rows || [];
-  buildPlFilters();
+  plColumnFilters = {};
+  buildPlHeader();
   drawPlTable();
 }
 
