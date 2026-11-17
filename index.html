@@ -272,6 +272,11 @@
   .plfilterbtn{font:inherit; font-size:10px; border:none; background:none; color:var(--muted); cursor:pointer; padding:1px 3px; border-radius:4px; vertical-align:middle;}
   .plfilterbtn:hover{background:var(--surface-muted); color:var(--ink-soft);}
   .plfilterbtn.active{color:#fff; background:var(--brand-red);}
+  .plsortind{font-size:10px; color:var(--brand-red); font-weight:700;}
+  .plpop-sort{display:flex; flex-direction:column; gap:2px; margin-bottom:8px; padding-bottom:8px; border-bottom:1px solid var(--line);}
+  .plpop-sort button{font:inherit; font-size:11.5px; text-align:left; border:none; background:none; color:var(--ink-soft); cursor:pointer; padding:4px 6px; border-radius:6px;}
+  .plpop-sort button:hover{background:var(--surface-soft);}
+  .plpop-sort button.active{background:var(--surface-muted); color:var(--ink); font-weight:700;}
   .plpill{display:inline-block; padding:2px 8px; border-radius:var(--radius-pill); font-size:10.5px; font-weight:700; white-space:nowrap;}
   .plpill.pl-ok{background:var(--safe-soft); color:var(--safe);}
   .plpill.pl-warn{background:var(--care-soft); color:var(--care);}
@@ -936,6 +941,7 @@ function renderWeekGoal(stages, duTotal){
 // visão de pipeline do Closer OS dentro da Gestão Comercial ----------
 var plRows = [];
 var plColumnFilters = {}; // key -> Set de valores permitidos, ou ausente/null = sem filtro
+var plSort = { key:'dataRM', dir:'desc' };
 var plOpenPopover = null; // {key, el}
 var PL_STATUS_PILL = { 'Realizada':'pl-ok', 'No-show':'pl-bad', 'Marcada':'pl-warn' };
 var PL_STATUS_LABEL = { 'Realizada':'Sim', 'No-show':'Não (no-show)', 'Marcada':'Agendada' };
@@ -951,6 +957,14 @@ var PL_COLUMNS = [
 ];
 function plPill(cls, text){ return '<span class="plpill '+(cls||'pl-muted')+'">'+text+'</span>'; }
 function plValueLabel(col, v){ v = v || '—'; return col.valueLabel ? col.valueLabel(v) : v; }
+// Data R.M/R.R ordena cronologicamente (dateKey "AAAA-MM-DD"); as outras colunas ordenam por
+// texto (localeCompare com numeric:true pra "SDR 2" vir antes de "SDR 10" se algum dia existir).
+function plCompareValues(col, a, b){
+  var va = a[col.key] || '', vb = b[col.key] || '';
+  if(col.key==='dataRM' || col.key==='dataRR'){ va = dateKey(va); vb = dateKey(vb); }
+  else { va = plValueLabel(col, va); vb = plValueLabel(col, vb); }
+  return String(va).localeCompare(String(vb), 'pt-BR', { numeric:true });
+}
 // Mesma lógica do Excel: as opções de UMA coluna já descontam os filtros ativos nas OUTRAS
 // (exceptKey), senão marcar um filtro escondia as opções que ele mesmo deveria oferecer.
 function plRowPassesFilters(r, exceptKey){
@@ -982,11 +996,22 @@ function plOpenPopoverFor(col, btn){
   var pop = document.createElement('div');
   pop.className = 'plpop';
   pop.innerHTML =
+    '<div class="plpop-sort">'+
+      '<button type="button" data-dir="asc"'+(plSort.key===col.key && plSort.dir==='asc'?' class="active"':'')+'>↑ Menor → Maior</button>'+
+      '<button type="button" data-dir="desc"'+(plSort.key===col.key && plSort.dir==='desc'?' class="active"':'')+'>↓ Maior → Menor</button>'+
+    '</div>'+
     '<input type="text" class="plpop-search" placeholder="Buscar…">'+
     '<div class="plpop-actions"><button type="button" data-act="all">Selecionar tudo</button><button type="button" data-act="none">Limpar</button></div>'+
     '<div class="plpop-list"></div>'+
     '<div class="plpop-foot"><button type="button" class="plpop-cancel">Cancelar</button><button type="button" class="plpop-ok">OK</button></div>';
   document.body.appendChild(pop);
+  pop.querySelectorAll('.plpop-sort button').forEach(function(sbtn){
+    sbtn.addEventListener('click', function(){
+      plSort = { key: col.key, dir: sbtn.getAttribute('data-dir') };
+      pop.querySelectorAll('.plpop-sort button').forEach(function(b){ b.classList.toggle('active', b===sbtn); });
+      drawPlTable();
+    });
+  });
 
   function renderList(filterText){
     var list = pop.querySelector('.plpop-list');
@@ -1032,7 +1057,7 @@ function buildPlHeader(){
   var table = document.getElementById('plTable');
   if(!table) return;
   table.innerHTML = '<thead><tr>'+PL_COLUMNS.map(function(col){
-    return '<th>'+col.label+' <button type="button" class="plfilterbtn" data-col="'+col.key+'">▾</button></th>';
+    return '<th>'+col.label+'<span class="plsortind" data-col="'+col.key+'"></span> <button type="button" class="plfilterbtn" data-col="'+col.key+'">▾</button></th>';
   }).join('')+'</tr></thead><tbody></tbody>';
   table.querySelectorAll('.plfilterbtn').forEach(function(btn){
     btn.addEventListener('click', function(e){
@@ -1049,8 +1074,13 @@ function drawPlTable(){
   table.querySelectorAll('.plfilterbtn').forEach(function(btn){
     btn.classList.toggle('active', !!plColumnFilters[btn.getAttribute('data-col')]);
   });
+  table.querySelectorAll('.plsortind').forEach(function(el){
+    var k = el.getAttribute('data-col');
+    el.textContent = plSort.key===k ? (plSort.dir==='asc' ? ' ↑' : ' ↓') : '';
+  });
+  var sortCol = PL_COLUMNS.filter(function(c){ return c.key===plSort.key; })[0] || PL_COLUMNS[1];
   var rows = plRows.filter(function(r){ return plRowPassesFilters(r, null); })
-    .sort(function(a,b){ return dateKey(b.dataRM||'').localeCompare(dateKey(a.dataRM||'')); });
+    .sort(function(a,b){ var cmp = plCompareValues(sortCol, a, b); return plSort.dir==='asc' ? cmp : -cmp; });
   var tbody = table.querySelector('tbody');
   var box = document.getElementById('plFilters');
   if(box) box.innerHTML = '<span class="plcount">'+rows.length+' de '+plRows.length+' reuniões</span>'+
@@ -1072,6 +1102,7 @@ function drawPlTable(){
 function renderPipeline(rows){
   plRows = rows || [];
   plColumnFilters = {};
+  plSort = { key:'dataRM', dir:'desc' };
   buildPlHeader();
   drawPlTable();
 }
