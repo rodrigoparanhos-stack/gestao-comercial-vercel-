@@ -694,12 +694,18 @@ export default async function handler(req, res) {
       const vendida = mySales.reduce((a, r) => a + toNum(r.receita_m1), 0);
       const ativ = mySales.filter(r => isAtivado(r)).length;
       const m1 = mySales.filter(r => isAtivado(r)).reduce((a, r) => a + receitaAtivadaValor(r), 0);
+      // caixa (Caixa Coletado por closer): mesma definição de m1TotalBruto (fallback), já
+      // filtrada por closer — isAtivado() já exclui CHURN_M0_OVERRIDES, então valor_pago_conta_azul
+      // aqui nunca inclui dinheiro de churn M0 (sem precisar subtrair de novo, ao contrário do
+      // m1TotalBruto global que vem agregado pelo snapshot e só desconta churn depois).
+      const caixa = mySales.filter(r => isAtivado(r)).reduce((a, r) => a + toNum(r.valor_pago_conta_azul), 0);
       const meta = metasMonth.find(m => m.closer === name) || {};
       return {
         nome: closerLabel[name], rr, rrMeta: toNum(meta.meta_rr),
         ativ, ativMeta: toNum(meta.meta_ativados),
         m1, m1Meta: toNum(meta.meta_receita_m1),
         vendas, vendida, vendasMeta: (META_VENDAS && META_VENDAS.porCloser[name]) || 0,
+        caixa,
       };
     });
     // "Outros" — qualquer R.R/venda de um closer fora do roster fixo (ex.: Rodrigo Paranhos
@@ -718,14 +724,15 @@ export default async function handler(req, res) {
         ativ, ativMeta: 0,
         m1: outrosSales.filter(r => isAtivado(r)).reduce((a, r) => a + receitaAtivadaValor(r), 0), m1Meta: 0,
         vendas: outrosSales.length, vendida: outrosSales.reduce((a, r) => a + toNum(r.receita_m1), 0), vendasMeta: 0,
+        caixa: outrosSales.filter(r => isAtivado(r)).reduce((a, r) => a + toNum(r.valor_pago_conta_azul), 0),
         outros: true,
       });
     }
     const totalsCloser = closers.reduce((a, c) => ({
       rr: a.rr + c.rr, rrMeta: a.rrMeta + c.rrMeta, vendas: a.vendas + c.vendas,
       vendida: a.vendida + c.vendida, ativ: a.ativ + c.ativ, ativMeta: a.ativMeta + c.ativMeta,
-      m1: a.m1 + c.m1, m1Meta: a.m1Meta + c.m1Meta,
-    }), { rr: 0, rrMeta: 0, vendas: 0, vendida: 0, ativ: 0, ativMeta: 0, m1: 0, m1Meta: 0 });
+      m1: a.m1 + c.m1, m1Meta: a.m1Meta + c.m1Meta, caixa: a.caixa + c.caixa,
+    }), { rr: 0, rrMeta: 0, vendas: 0, vendida: 0, ativ: 0, ativMeta: 0, m1: 0, m1Meta: 0, caixa: 0 });
 
     // ---------- PROPRIETÁRIO ("Quem entrou" na reunião) ----------
     // closer_pipeline_control.participantes_reuniao vem normalizado em papéis canônicos
