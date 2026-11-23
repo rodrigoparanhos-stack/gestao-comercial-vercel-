@@ -604,12 +604,48 @@ function isChurnM0(empresa) {
     return tokens.every(t => qSet.has(t)) || queryTokens.every(t => cSet.has(t));
   });
 }
+// ATIVACAO_MANUAL_OVERRIDES: o inverso do CHURN_M0_OVERRIDES acima — vendas que o Rodrigo
+// confirmou como pagas (recebeu o dinheiro), mas que o Conta Azul ainda não tinha refletido no
+// momento da sincronização (boleto não compensado na planilha ainda, etc). Pedido por Rodrigo
+// 2026-11-23 sobre Leoni Alimentos (R$39.340, confirmado recebido) e Caprese Pizza & Pasta
+// (R$12.364 — valor cheio do contrato, mesmo padrão da Leoni; CONFIRMAR se for outro valor).
+// `valor` só é somado em Caixa se a linha ainda não tiver valor_pago_conta_azul>0 (ver
+// valorPagoEfetivo) — assim que o Conta Azul sincronizar de verdade, o override para de somar
+// sozinho e não há risco de contar em dobro. Mesmo padrão de matching por token do
+// CHURN_M0_OVERRIDES, pra nunca bater por substring colada.
+const ATIVACAO_MANUAL_OVERRIDES = [
+  { nome: 'Leoni Alimentos', valor: 39340 },
+  { nome: 'Caprese Pizza & Pasta', valor: 12364 },
+];
+function manualAtivacaoOverride(empresa) {
+  const queryTokens = normNameTokens(empresa);
+  if (!tokensQualify(queryTokens)) return null;
+  const qSet = new Set(queryTokens);
+  return ATIVACAO_MANUAL_OVERRIDES.find(o => {
+    const tokens = normNameTokens(o.nome);
+    const cSet = new Set(tokens);
+    return tokens.every(t => qSet.has(t)) || queryTokens.every(t => cSet.has(t));
+  }) || null;
+}
 // isAtivado: substitui toda checagem "r.ativado === 'SIM'" feita sobre uma linha de venda —
 // nunca considera Ativado um CHURN_M0_OVERRIDES, mesmo que o campo bruto da planilha diga SIM.
+// Também considera Ativado qualquer linha em ATIVACAO_MANUAL_OVERRIDES, mesmo que a planilha
+// ainda diga NAO/vazio (ver nota acima).
 // Não usar dentro do cálculo de m1TotalBruto (Caixa): esse já desconta o recebido do churn
 // separadamente via churnM0Recebido, então aplicar isAtivado ali subtrairia em dobro.
 function isAtivado(r) {
-  return r.ativado === 'SIM' && !isChurnM0(r.empresa);
+  if (r.ativado === 'SIM' && !isChurnM0(r.empresa)) return true;
+  return !!manualAtivacaoOverride(r.empresa);
+}
+// valorPagoEfetivo: mesma ideia de isAtivado, mas pro valor recebido (Caixa). Só usa o override
+// manual quando a planilha ainda não tem valor_pago_conta_azul>0 pra essa linha — isso faz o
+// override "desligar sozinho" quando o Conta Azul sincronizar de verdade, sem precisar lembrar
+// de tirar o override depois (embora ainda valha limpar ATIVACAO_MANUAL_OVERRIDES nesse ponto).
+function valorPagoEfetivo(r) {
+  const raw = toNum(r.valor_pago_conta_azul);
+  if (raw > 0) return raw;
+  const override = manualAtivacaoOverride(r.empresa);
+  return override ? override.valor : raw;
 }
 
 function money1(n) { return n; }
@@ -698,7 +734,7 @@ export default async function handler(req, res) {
       // filtrada por closer — isAtivado() já exclui CHURN_M0_OVERRIDES, então valor_pago_conta_azul
       // aqui nunca inclui dinheiro de churn M0 (sem precisar subtrair de novo, ao contrário do
       // m1TotalBruto global que vem agregado pelo snapshot e só desconta churn depois).
-      const caixa = mySales.filter(r => isAtivado(r)).reduce((a, r) => a + toNum(r.valor_pago_conta_azul), 0);
+      const caixa = mySales.filter(r => isAtivado(r)).reduce((a, r) => a + valorPagoEfetivo(r), 0);
       const meta = metasMonth.find(m => m.closer === name) || {};
       return {
         nome: closerLabel[name], rr, rrMeta: toNum(meta.meta_rr),
@@ -724,7 +760,7 @@ export default async function handler(req, res) {
         ativ, ativMeta: 0,
         m1: outrosSales.filter(r => isAtivado(r)).reduce((a, r) => a + receitaAtivadaValor(r), 0), m1Meta: 0,
         vendas: outrosSales.length, vendida: outrosSales.reduce((a, r) => a + toNum(r.receita_m1), 0), vendasMeta: 0,
-        caixa: outrosSales.filter(r => isAtivado(r)).reduce((a, r) => a + toNum(r.valor_pago_conta_azul), 0),
+        caixa: outrosSales.filter(r => isAtivado(r)).reduce((a, r) => a + valorPagoEfetivo(r), 0),
         outros: true,
       });
     }
@@ -933,9 +969,19 @@ export default async function handler(req, res) {
     // m1Total = Caixa (o que REALMENTE entrou no Conta Azul, parcela por parcela) — distinto de
     // Ativado (valor contratado inteiro, ver ativadoContratadoTotal abaixo). Fallback soma
     // valor_pago_conta_azul por venda (não receitaAtivadaValor, que agora é sempre o contratado).
-    const m1TotalBruto = closerTotals && closerTotals.valorPagoContaAzul != null
+    // manualAtivacaoExtra: soma dos ATIVACAO_MANUAL_OVERRIDES cuja venda deste mês ainda não tem
+    // valor_pago_conta_azul>0 na planilha — precisa somar aqui em cima de qualquer um dos dois
+    // ramos (snapshot externo OU fallback local), porque o snapshot do Closer OS também vem do
+    // Conta Azul e não sabe do override manual ainda.
+    const manualAtivacaoExtra = ATIVACAO_MANUAL_OVERRIDES.reduce((sum, o) => {
+      const row = salesMonth.find(r => manualAtivacaoOverride(r.empresa) === o);
+      if (!row || toNum(row.valor_pago_conta_azul) > 0) return sum;
+      return sum + o.valor;
+    }, 0);
+    const m1TotalBruto = (closerTotals && closerTotals.valorPagoContaAzul != null
       ? closerTotals.valorPagoContaAzul
-      : salesMonth.filter(r => r.ativado === 'SIM').reduce((a, r) => a + toNum(r.valor_pago_conta_azul), 0);
+      : salesMonth.filter(r => r.ativado === 'SIM').reduce((a, r) => a + toNum(r.valor_pago_conta_azul), 0))
+      + manualAtivacaoExtra;
     // churnM0Recebido: desconta do Caixa o que já entrou de clientes em CHURN_M0_OVERRIDES
     // (ativaram e cancelaram dentro do mês — esse dinheiro não fica em conta, pedido por
     // Rodrigo 2026-11-13 sobre a DLOOK). Usa o mesmo snap (join por sale_id) do rawSales pra
@@ -1259,11 +1305,17 @@ export default async function handler(req, res) {
       // snap vem do snapshot do Closer OS (já é number nativo do JS) — toNum() espera string
       // pt-BR ("13.488,01") e corrompe um float nativo (ex.: 13488.01 -> 1348801, removendo o
       // ponto decimal como se fosse separador de milhar). Só usar toNum() na string da planilha.
-      const recebido = snap ? (Number(snap.valor_pago_conta_azul) || 0) : toNum(r.valor_pago_conta_azul);
+      const recebidoFonte = snap ? (Number(snap.valor_pago_conta_azul) || 0) : toNum(r.valor_pago_conta_azul);
+      // override manual entra só se a fonte (snapshot ou planilha) ainda não tem nada — some
+      // sozinho quando o Conta Azul sincronizar de verdade (ver valorPagoEfetivo/isAtivado acima).
+      const ativacaoOverride = recebidoFonte <= 0 ? manualAtivacaoOverride(r.empresa) : null;
+      const recebido = ativacaoOverride ? ativacaoOverride.valor : recebidoFonte;
       const forma = formaLabel(snap ? snap.forma_pagamento : r.forma_pagamento);
       const parcelas = snap && snap.qtd_parcelas_crm ? String(snap.qtd_parcelas_crm) : '';
       const installments = snap && Array.isArray(snap.installments) ? snap.installments : [];
-      const statusAtivacao = snap ? snap.status_ativacao : (r.status_ativacao || (r.ativado === 'SIM' ? 'ATIVADO' : 'SEM_MATCH'));
+      const statusAtivacao = ativacaoOverride
+        ? 'ATIVADO'
+        : (snap ? snap.status_ativacao : (r.status_ativacao || (r.ativado === 'SIM' ? 'ATIVADO' : 'SEM_MATCH')));
       return {
         sdr: EMAIL_SDR[r.sdr] || null, closer: closerLabel[r.closer] || r.closer || null,
         canal: r.__canal5, tier: r.__tier, ativado: isAtivado(r),
