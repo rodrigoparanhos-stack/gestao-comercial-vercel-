@@ -705,9 +705,42 @@ export default async function handler(req, res) {
     const canalLeadsRmAgg = leadsRmByCanal(leadsRows, competencia);
     const tierLeadsRmAgg = leadsRmByTier(leadsRows, competencia);
 
-    const salesMonth = sales.filter(r => r.competencia === competencia
+    // CATEGORIA_MANUAL_OVERRIDES: corrige saber/ter/executar/receita_m1 quando
+    // closer-os-crm-ca-snapshot.js só capturou 1 componente do negócio em vez de somar todos —
+    // isso acontece quando nenhuma parcela tinha sido confirmada paga ainda no momento do
+    // snapshot (o script cai no fallback `signed=[s]`, pegando só o componente achado via
+    // `components.find(c=>c.category==='saber')`, e descarta os demais). Pedido por Rodrigo
+    // 2026-11-23 sobre a Leoni Alimentos: o closer_pipeline_control real (planilha, aba de
+    // controle do Closer OS) tem Saber R$20.000 + Ter R$19.340 + Executar R$10.082,58/mês
+    // (booking 12 meses) pra esse negócio, mas closer_cockpit_sales só trouxe R$39.340
+    // (Saber+Ter somados) tudo debaixo de "saber", com Ter e Executar zerados — Executar nunca
+    // chegou no M1. Autodesliga sozinho quando a soma bruta da planilha já bater ou passar o
+    // total correto (sinal de que o snapshot já reconciliou de verdade), igual
+    // ATIVACAO_MANUAL_OVERRIDES logo abaixo.
+    const CATEGORIA_MANUAL_OVERRIDES = [
+      { nome: 'Leoni Alimentos', saber: 20000, ter: 19340, executar: 10082.58 },
+    ];
+    function categoriaOverride_(empresa) {
+      const queryTokens = normNameTokens(empresa);
+      if (!tokensQualify(queryTokens)) return null;
+      const qSet = new Set(queryTokens);
+      return CATEGORIA_MANUAL_OVERRIDES.find(o => {
+        const tokens = normNameTokens(o.nome);
+        const cSet = new Set(tokens);
+        return tokens.every(t => qSet.has(t)) || queryTokens.every(t => cSet.has(t));
+      }) || null;
+    }
+    const salesMonthRaw_ = sales.filter(r => r.competencia === competencia
       && !EXCLUDED_SALE_EMAILS.has(String(r.closer || '').toLowerCase())
       && !EXCLUDED_SALE_EMAILS.has(String(r.sdr || '').toLowerCase()));
+    const salesMonth = salesMonthRaw_.map(r => {
+      const override = categoriaOverride_(r.empresa);
+      if (!override) return r;
+      const rawTotal = toNum(r.saber) + toNum(r.ter) + toNum(r.executar);
+      const overrideTotal = override.saber + override.ter + override.executar;
+      if (rawTotal >= overrideTotal) return r;
+      return { ...r, saber: override.saber, ter: override.ter, executar: override.executar, receita_m1: overrideTotal, tcv: overrideTotal };
+    });
     const rrMonth = calls.filter(r => r.competencia_rr === competencia && r.reuniao_realizada === 'SIM');
     const metasMonth = metas.filter(r => r.competencia === competencia);
 
