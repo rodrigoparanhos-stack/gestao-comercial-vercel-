@@ -717,8 +717,12 @@ export default async function handler(req, res) {
     // chegou no M1. Autodesliga sozinho quando a soma bruta da planilha já bater ou passar o
     // total correto (sinal de que o snapshot já reconciliou de verdade), igual
     // ATIVACAO_MANUAL_OVERRIDES logo abaixo.
+    // Valores como STRING pt-BR (vírgula decimal, sem separador de milhar) — toNum() acima
+    // corrompe um float nativo do JS tratando o ponto decimal como separador de milhar (bug já
+    // documentado no resto do arquivo, ver nota perto de snapshotSalesById); escrever aqui do
+    // mesmo jeito que a planilha escreveria evita cair nessa pegadinha de novo.
     const CATEGORIA_MANUAL_OVERRIDES = [
-      { nome: 'Leoni Alimentos', saber: 20000, ter: 19340, executar: 10082.58 },
+      { nome: 'Leoni Alimentos', saber: '20000', ter: '19340', executar: '10082,58' },
     ];
     function categoriaOverride_(empresa) {
       const queryTokens = normNameTokens(empresa);
@@ -737,9 +741,11 @@ export default async function handler(req, res) {
       const override = categoriaOverride_(r.empresa);
       if (!override) return r;
       const rawTotal = toNum(r.saber) + toNum(r.ter) + toNum(r.executar);
-      const overrideTotal = override.saber + override.ter + override.executar;
+      const overrideSaber = toNum(override.saber), overrideTer = toNum(override.ter), overrideExecutar = toNum(override.executar);
+      const overrideTotal = overrideSaber + overrideTer + overrideExecutar;
       if (rawTotal >= overrideTotal) return r;
-      return { ...r, saber: override.saber, ter: override.ter, executar: override.executar, receita_m1: overrideTotal, tcv: overrideTotal };
+      const overrideTotalStr = String(overrideTotal).replace('.', ',');
+      return { ...r, saber: override.saber, ter: override.ter, executar: override.executar, receita_m1: overrideTotalStr, tcv: overrideTotalStr };
     });
     const rrMonth = calls.filter(r => r.competencia_rr === competencia && r.reuniao_realizada === 'SIM');
     const metasMonth = metas.filter(r => r.competencia === competencia);
