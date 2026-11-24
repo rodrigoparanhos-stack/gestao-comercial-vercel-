@@ -521,6 +521,16 @@ const CANAL_AQUISICAO_OVERRIDES = [
   // e nenhum dos 3 realizou ainda.
   { nome: 'CORREAMAQ', canal: 'Lista Fria' },
   { nome: 'Clinica Dr Agnaldo Lima', canal: 'Lista Fria' },
+  // Mais 5 de Lista Fria (mesmo padrão, confirmados via CRM em 2026-11-24): realizaram R.R
+  // depois da última atualização desta lista (12/11) e caíam em Recovery por engano, via o
+  // fallback isVitor(row) => 'Recovery' em canal5(). acquisition_channel="Prospecção Fria"
+  // confirmado via consultar_leads_crm pras 5 (SGlass e Libero Seguros já eram esperadas aqui —
+  // ver comentário acima, "nenhum dos 3 realizou ainda" na época).
+  { nome: 'SGlass Industria', canal: 'Lista Fria' },
+  { nome: 'FLORESCENTIA', canal: 'Lista Fria' },
+  { nome: 'Goppo industria de máquinas', canal: 'Lista Fria' },
+  { nome: 'Libero Seguros', canal: 'Lista Fria' },
+  { nome: 'Spectra Analisadores', canal: 'Lista Fria' },
   // Indicação não é exclusividade do Davi: Fausto (SDR) também tem leads confirmados no CRM com
   // acquisition_channel="Indicação" (Indicação de Investidor/Parceiro) vindos do board Outbound —
   // a regra "Outbound + SDR≠Davi = Recovery" jogava esses 3 pra Recovery por engano. Rodrigo
