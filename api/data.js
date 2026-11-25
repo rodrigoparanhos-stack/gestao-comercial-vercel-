@@ -682,7 +682,7 @@ export default async function handler(req, res) {
     // "quentes" entre requests, então um valor calculado só na inicialização travaria no dia
     // do cold start em vez de acompanhar o dia real.
     const PACE = { du: computeDiasUteisDecorridos(competencia, metaMes.holidays), duTotal: computeTotalDiasUteis_(competencia, metaMes.holidays) };
-    const [sales, calls, metas, pipelineControl, leadsRows, sdrOsLive, closerSnapshot, reunioesRows] = await Promise.all([
+    const [sales, calls, metas, pipelineControl, leadsRows, sdrOsLive, closerSnapshotRaw, reunioesRows] = await Promise.all([
       fetchSheet('closer_cockpit_sales'),
       fetchSheet('closer_cockpit_calls'),
       fetchSheet('closer_cockpit_metas'),
@@ -707,6 +707,49 @@ export default async function handler(req, res) {
       // acima. Se falhar, cai pro cálculo antigo via sdrOsLive.meetings (nunca quebra a página).
       fetchReunioesFuturas().catch(() => null),
     ]);
+    // EXCLUDED_DEAL_IDS / applyDealExclusions_: exclusão pontual de 1 negócio específico (não de
+    // um e-mail inteiro, ver EXCLUDED_SALE_EMAILS acima). Pedido por Rodrigo em 2026-11-25 pra
+    // Carflix Penha / RPG Intermediação de Negócios (op_id=sale_id=event_id=lead_id
+    // f94d8083-731c-40dc-9443-de53b0ae1519 / 9dfaa656-cf9c-428b-af72-33be9cdb0d30, closer Herico,
+    // SDR Outbound alisson.eduardo@): essa R.R/venda não deve contar em nenhum produto porque ele
+    // vai contabilizar essa receita internamente como Monetização, fora do funil padrão
+    // SDR->Closer — mesmo que o CRM registre como fechamento normal do Herico. Herico tem outras
+    // vendas legítimas no mês, então não dá pra usar o padrão EXCLUDED_SALE_EMAILS (tiraria tudo
+    // dele). O snapshot do n8n (closerSnapshotRaw) já chega com R.R/Vendas/Caixa PRÉ-agregados em
+    // totals/byCloser — boa parte do dashboard usa esses agregados direto em vez de recalcular
+    // (rrTotal, m1TotalBruto, byCloserSnapshot[name].rr mais abaixo), então só filtrar os arrays
+    // calls/sales não mudaria o número exibido: é preciso também descontar de totals/byCloser aqui,
+    // no único lugar por onde o snapshot passa antes de qualquer cálculo usá-lo.
+    const EXCLUDED_DEAL_IDS = new Set(['9dfaa656-cf9c-428b-af72-33be9cdb0d30', 'f94d8083-731c-40dc-9443-de53b0ae1519']);
+    function applyDealExclusions_(snapshot) {
+      if (!snapshot) return snapshot;
+      const patched = { ...snapshot, byCloser: { ...(snapshot.byCloser || {}) }, totals: { ...(snapshot.totals || {}) } };
+      const removedCalls = (snapshot.calls || []).filter(c => EXCLUDED_DEAL_IDS.has(String(c.event_id || '')));
+      const removedSales = (snapshot.sales || []).filter(s => EXCLUDED_DEAL_IDS.has(String(s.sale_id || '')));
+      patched.calls = (snapshot.calls || []).filter(c => !EXCLUDED_DEAL_IDS.has(String(c.event_id || '')));
+      patched.sales = (snapshot.sales || []).filter(s => !EXCLUDED_DEAL_IDS.has(String(s.sale_id || '')));
+      removedCalls.forEach(c => {
+        if (c.reuniao_realizada !== 'SIM') return;
+        patched.totals.rr = toNum(patched.totals.rr) - 1;
+        if (patched.byCloser[c.closer]) patched.byCloser[c.closer] = { ...patched.byCloser[c.closer], rr: toNum(patched.byCloser[c.closer].rr) - 1 };
+      });
+      removedSales.forEach(s => {
+        const statusKey = s.ativado === 'SIM' ? 'activated' : (s.status_ativacao === 'SEM_MATCH' ? 'semMatch' : 'open');
+        patched.totals.sales = toNum(patched.totals.sales) - 1;
+        patched.totals.receitaM1Assinada = toNum(patched.totals.receitaM1Assinada) - toNum(s.receita_m1);
+        patched.totals.tcvAssinado = toNum(patched.totals.tcvAssinado) - toNum(s.tcv);
+        patched.totals.valorPagoContaAzul = toNum(patched.totals.valorPagoContaAzul) - toNum(s.valor_pago_conta_azul);
+        patched.totals[statusKey] = toNum(patched.totals[statusKey]) - 1;
+        if (patched.byCloser[s.closer]) {
+          const bc = { ...patched.byCloser[s.closer] };
+          bc.sales = toNum(bc.sales) - 1;
+          bc[statusKey] = toNum(bc[statusKey]) - 1;
+          patched.byCloser[s.closer] = bc;
+        }
+      });
+      return patched;
+    }
+    const closerSnapshot = applyDealExclusions_(closerSnapshotRaw);
     // sdrOsMeetings: movido pra cá (era declarado só perto do cálculo de R.F, bem mais abaixo)
     // porque a correção de R.M por canal (rmOverrideDelta, mais abaixo) também precisa dela.
     const sdrOsMeetings = (sdrOsLive && Array.isArray(sdrOsLive.meetings)) ? sdrOsLive.meetings : [];
@@ -746,7 +789,8 @@ export default async function handler(req, res) {
     }
     const salesMonthRaw_ = sales.filter(r => r.competencia === competencia
       && !EXCLUDED_SALE_EMAILS.has(String(r.closer || '').toLowerCase())
-      && !EXCLUDED_SALE_EMAILS.has(String(r.sdr || '').toLowerCase()));
+      && !EXCLUDED_SALE_EMAILS.has(String(r.sdr || '').toLowerCase())
+      && !EXCLUDED_DEAL_IDS.has(String(r.sale_id || '')));
     const salesMonth = salesMonthRaw_.map(r => {
       const override = categoriaOverride_(r.empresa);
       if (!override) return r;
@@ -757,7 +801,8 @@ export default async function handler(req, res) {
       const overrideTotalStr = String(overrideTotal).replace('.', ',');
       return { ...r, saber: override.saber, ter: override.ter, executar: override.executar, receita_m1: overrideTotalStr, tcv: overrideTotalStr };
     });
-    const rrMonth = calls.filter(r => r.competencia_rr === competencia && r.reuniao_realizada === 'SIM');
+    const rrMonth = calls.filter(r => r.competencia_rr === competencia && r.reuniao_realizada === 'SIM'
+      && !EXCLUDED_DEAL_IDS.has(String(r.event_id || '')));
     const metasMonth = metas.filter(r => r.competencia === competencia);
 
     // ---------- CLOSERS ----------
