@@ -540,6 +540,10 @@ const CANAL_AQUISICAO_OVERRIDES = [
   { nome: 'Arranjo Express Brasil', canal: 'Indicação' },
   { nome: 'Hi-Teck Audio e Video', canal: 'Indicação' },
   { nome: 'Aline Parente Psicologia', canal: 'Indicação' },
+  // Mais 2 de Indicação (mesmo padrão acima, confirmadas via CRM em 2026-11-25):
+  // acquisition_channel="Indicação" real, caindo em Recovery pela regra "Outbound+SDR≠Davi".
+  { nome: 'Luztol Indústria Química', canal: 'Indicação' },
+  { nome: 'Aline Cauduro', canal: 'Indicação' },
 ];
 // resolveCanalOverride: mesmo bug de substring colado já corrigido em resolveByName/
 // buildNameIndex (2026-11-11, caso Leadbroker) encontrado aqui também em 2026-11-12 — "iTeck"
@@ -935,6 +939,14 @@ export default async function handler(req, res) {
     const rmOverrideDelta = {};
     sdrOsMeetings.forEach(m => {
       if (!String(m.rmDate || '').startsWith(competencia)) return;
+      // EXCLUDED_DEAL_IDS aqui também (mesmo negócio da Carflix Penha/RPG, ver nota acima):
+      // sdrOsMeetings tem id = event_id/lead_id do CRM, então dá pra casar por id em vez de nome.
+      // Só desconta do canal onde caiu (Recovery) e não desloca pra nenhum outro — ela não deve
+      // contar em nenhum canal do funil SDR->Closer, vira Monetização à parte.
+      if (EXCLUDED_DEAL_IDS.has(String(m.id || ''))) {
+        rmOverrideDelta[m.channel] = (rmOverrideDelta[m.channel] || 0) - 1;
+        return;
+      }
       const override = resolveCanalOverride(m.company);
       if (!override || override === m.channel) return;
       rmOverrideDelta[m.channel] = (rmOverrideDelta[m.channel] || 0) - 1;
