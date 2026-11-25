@@ -725,6 +725,13 @@ export default async function handler(req, res) {
     // calls/sales não mudaria o número exibido: é preciso também descontar de totals/byCloser aqui,
     // no único lugar por onde o snapshot passa antes de qualquer cálculo usá-lo.
     const EXCLUDED_DEAL_IDS = new Set(['9dfaa656-cf9c-428b-af72-33be9cdb0d30', 'f94d8083-731c-40dc-9443-de53b0ae1519']);
+    // numRaw: os campos de snapshot.totals/byCloser aqui já chegam como number puro do JSON do
+    // n8n (ex.: 263445.80999999994), nunca como string formatada BR tipo "263.445,81" — usar
+    // toNum() neles é o bug (toNum assume string e remove o "." como separador de milhar, virando
+    // 26344580999999994). toNum() continua certo pra campos de linha tipo s.receita_m1/s.tcv que
+    // também são number puro aqui, então o mesmo problema valia pra eles — por isso numRaw cobre
+    // os dois lados da subtração, não só o acumulador.
+    function numRaw(v) { return Number(v) || 0; }
     function applyDealExclusions_(snapshot) {
       if (!snapshot) return snapshot;
       const patched = { ...snapshot, byCloser: { ...(snapshot.byCloser || {}) }, totals: { ...(snapshot.totals || {}) } };
@@ -734,20 +741,20 @@ export default async function handler(req, res) {
       patched.sales = (snapshot.sales || []).filter(s => !EXCLUDED_DEAL_IDS.has(String(s.sale_id || '')));
       removedCalls.forEach(c => {
         if (c.reuniao_realizada !== 'SIM') return;
-        patched.totals.rr = toNum(patched.totals.rr) - 1;
-        if (patched.byCloser[c.closer]) patched.byCloser[c.closer] = { ...patched.byCloser[c.closer], rr: toNum(patched.byCloser[c.closer].rr) - 1 };
+        patched.totals.rr = numRaw(patched.totals.rr) - 1;
+        if (patched.byCloser[c.closer]) patched.byCloser[c.closer] = { ...patched.byCloser[c.closer], rr: numRaw(patched.byCloser[c.closer].rr) - 1 };
       });
       removedSales.forEach(s => {
         const statusKey = s.ativado === 'SIM' ? 'activated' : (s.status_ativacao === 'SEM_MATCH' ? 'semMatch' : 'open');
-        patched.totals.sales = toNum(patched.totals.sales) - 1;
-        patched.totals.receitaM1Assinada = toNum(patched.totals.receitaM1Assinada) - toNum(s.receita_m1);
-        patched.totals.tcvAssinado = toNum(patched.totals.tcvAssinado) - toNum(s.tcv);
-        patched.totals.valorPagoContaAzul = toNum(patched.totals.valorPagoContaAzul) - toNum(s.valor_pago_conta_azul);
-        patched.totals[statusKey] = toNum(patched.totals[statusKey]) - 1;
+        patched.totals.sales = numRaw(patched.totals.sales) - 1;
+        patched.totals.receitaM1Assinada = numRaw(patched.totals.receitaM1Assinada) - numRaw(s.receita_m1);
+        patched.totals.tcvAssinado = numRaw(patched.totals.tcvAssinado) - numRaw(s.tcv);
+        patched.totals.valorPagoContaAzul = numRaw(patched.totals.valorPagoContaAzul) - numRaw(s.valor_pago_conta_azul);
+        patched.totals[statusKey] = numRaw(patched.totals[statusKey]) - 1;
         if (patched.byCloser[s.closer]) {
           const bc = { ...patched.byCloser[s.closer] };
-          bc.sales = toNum(bc.sales) - 1;
-          bc[statusKey] = toNum(bc[statusKey]) - 1;
+          bc.sales = numRaw(bc.sales) - 1;
+          bc[statusKey] = numRaw(bc[statusKey]) - 1;
           patched.byCloser[s.closer] = bc;
         }
       });
