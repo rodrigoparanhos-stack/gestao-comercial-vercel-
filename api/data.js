@@ -1406,6 +1406,7 @@ export default async function handler(req, res) {
       return {
         empresa: m.company || '', dataRM: isoToBr_(m.rmDate), sdr: m.player || '',
         closer: call ? (closerLabel[call.closer] || call.closer || '—') : '—',
+        tier: call ? (tierLabel[call.tier] || call.tier || '—') : '—',
         dataRR: isoToBr_(m.rrDate), status: m.status || '', canal: m.channel || '', venda,
       };
     });

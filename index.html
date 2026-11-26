@@ -952,6 +952,7 @@ var PL_COLUMNS = [
   { key:'dataRM', label:'Data R.M', cls:'pldate' },
   { key:'sdr', label:'SDR', cls:'plname' },
   { key:'closer', label:'Closer', cls:'plname' },
+  { key:'tier', label:'Tier', cls:'plname' },
   { key:'dataRR', label:'Data R.R', cls:'pldate' },
   { key:'status', label:'R.R', valueLabel:function(v){ return PL_STATUS_LABEL[v]||v; }, render:function(r){ return plPill(PL_STATUS_PILL[r.status], PL_STATUS_LABEL[r.status]||r.status||'—'); } },
   { key:'venda', label:'Venda', render:function(r){ return plPill(PL_VENDA_PILL[r.venda], r.venda||'—'); } },
