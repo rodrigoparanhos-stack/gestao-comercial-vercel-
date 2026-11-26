@@ -725,6 +725,16 @@ export default async function handler(req, res) {
     // calls/sales não mudaria o número exibido: é preciso também descontar de totals/byCloser aqui,
     // no único lugar por onde o snapshot passa antes de qualquer cálculo usá-lo.
     const EXCLUDED_DEAL_IDS = new Set(['9dfaa656-cf9c-428b-af72-33be9cdb0d30', 'f94d8083-731c-40dc-9443-de53b0ae1519']);
+    // EXCLUDED_RR_IDS: diferente de EXCLUDED_DEAL_IDS acima — aqui o R.M continua contando normal
+    // (a reunião foi agendada de verdade), só o R.R sai, porque o CRM registrou
+    // reuniao_realizada=SIM errado (devia ser No-show). Por isso NÃO entra no rmOverrideDelta
+    // (que zera R.M por canal) nem no removedSales de applyDealExclusions_ — só tira a linha de
+    // calls e desconta 1 de totals.rr/byCloser[x].rr. Caso "Comercial Clock"/"Francini Clock"
+    // (event_id=lead_id=b0733aa5-6ceb-48ec-bad8-698e869889c1, op_id=cc0be403-9cc9-4106-a9f8-
+    // a3eaf12c3d83, closer Filipe, SDR Fausto/alisson.eduardo@): Rodrigo confirmou em 2026-11-20
+    // e pediu a exclusão em 2026-11-26 — desconsiderar do R.R de SDR e Closer em SDR OS/Closer
+    // OS/Gestão Comercial. SDR OS e Closer OS (Apps Script) ainda não corrigidos — só esta planilha.
+    const EXCLUDED_RR_IDS = new Set(['b0733aa5-6ceb-48ec-bad8-698e869889c1']);
     // numRaw: os campos de snapshot.totals/byCloser aqui já chegam como number puro do JSON do
     // n8n (ex.: 263445.80999999994), nunca como string formatada BR tipo "263.445,81" — usar
     // toNum() neles é o bug (toNum assume string e remove o "." como separador de milhar, virando
@@ -735,9 +745,10 @@ export default async function handler(req, res) {
     function applyDealExclusions_(snapshot) {
       if (!snapshot) return snapshot;
       const patched = { ...snapshot, byCloser: { ...(snapshot.byCloser || {}) }, totals: { ...(snapshot.totals || {}) } };
-      const removedCalls = (snapshot.calls || []).filter(c => EXCLUDED_DEAL_IDS.has(String(c.event_id || '')));
+      const isExcludedCall = c => EXCLUDED_DEAL_IDS.has(String(c.event_id || '')) || EXCLUDED_RR_IDS.has(String(c.event_id || ''));
+      const removedCalls = (snapshot.calls || []).filter(isExcludedCall);
       const removedSales = (snapshot.sales || []).filter(s => EXCLUDED_DEAL_IDS.has(String(s.sale_id || '')));
-      patched.calls = (snapshot.calls || []).filter(c => !EXCLUDED_DEAL_IDS.has(String(c.event_id || '')));
+      patched.calls = (snapshot.calls || []).filter(c => !isExcludedCall(c));
       patched.sales = (snapshot.sales || []).filter(s => !EXCLUDED_DEAL_IDS.has(String(s.sale_id || '')));
       removedCalls.forEach(c => {
         if (c.reuniao_realizada !== 'SIM') return;
@@ -813,7 +824,7 @@ export default async function handler(req, res) {
       return { ...r, saber: override.saber, ter: override.ter, executar: override.executar, receita_m1: overrideTotalStr, tcv: overrideTotalStr };
     });
     const rrMonth = calls.filter(r => r.competencia_rr === competencia && r.reuniao_realizada === 'SIM'
-      && !EXCLUDED_DEAL_IDS.has(String(r.event_id || '')));
+      && !EXCLUDED_DEAL_IDS.has(String(r.event_id || '')) && !EXCLUDED_RR_IDS.has(String(r.event_id || '')));
     const metasMonth = metas.filter(r => r.competencia === competencia);
 
     // ---------- CLOSERS ----------
