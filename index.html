@@ -869,13 +869,13 @@ function renderClosers(closers, totals){
       {name:'Vendas | Ativado', real:c.vendas, real2:c.ativ, meta:c.vendasMeta, duo:true},
       {name:'Conversão Ativado', real:convAtiv, percent:true, sub:'R.R → Ativado'},
       {name:'Receita M1 vendida', real:c.vendida, meta:null, noMeta:true, money:true},
-      {name:'Caixa Coletado', real:c.caixa, meta:null, noMeta:true, money:true}
+      c.caixaMeta? {name:'Caixa Coletado', real:c.caixa, meta:c.caixaMeta, money:true} : {name:'Caixa Coletado', real:c.caixa, meta:null, noMeta:true, money:true}
     ]));
   });
   document.getElementById('closerTable').innerHTML =
-    '<tr><th>Closer</th><th>R.R</th><th>Meta RR</th><th>Vendas</th><th>Meta vendas</th><th>Receita vendida</th><th>Ativados</th><th>Meta ativ.</th><th>M1 ativada</th><th>Meta M1</th><th>Caixa coletado</th></tr>'+
-    closers.map(function(c){return '<tr><td>'+c.nome+'</td><td>'+c.rr+'</td><td>'+c.rrMeta+'</td><td>'+c.vendas+'</td><td>'+(c.vendasMeta||'—')+'</td><td>'+money(c.vendida)+'</td><td>'+c.ativ+'</td><td>'+c.ativMeta+'</td><td>'+money(c.m1)+'</td><td>'+money(c.m1Meta)+'</td><td>'+money(c.caixa)+'</td></tr>';}).join('')+
-    '<tr style="font-weight:700"><td>Total</td><td>'+totals.rr+'</td><td>'+totals.rrMeta+'</td><td>'+totals.vendas+'</td><td>—</td><td>'+money(totals.vendida)+'</td><td>'+totals.ativ+'</td><td>'+totals.ativMeta+'</td><td>'+money(totals.m1)+'</td><td>'+money(totals.m1Meta)+'</td><td>'+money(totals.caixa)+'</td></tr>';
+    '<tr><th>Closer</th><th>R.R</th><th>Meta RR</th><th>Vendas</th><th>Meta vendas</th><th>Receita vendida</th><th>Ativados</th><th>Meta ativ.</th><th>M1 ativada</th><th>Meta M1</th><th>Caixa coletado</th><th>Meta Caixa</th></tr>'+
+    closers.map(function(c){return '<tr><td>'+c.nome+'</td><td>'+c.rr+'</td><td>'+c.rrMeta+'</td><td>'+c.vendas+'</td><td>'+(c.vendasMeta||'—')+'</td><td>'+money(c.vendida)+'</td><td>'+c.ativ+'</td><td>'+c.ativMeta+'</td><td>'+money(c.m1)+'</td><td>'+money(c.m1Meta)+'</td><td>'+money(c.caixa)+'</td><td>'+(c.caixaMeta?money(c.caixaMeta):'—')+'</td></tr>';}).join('')+
+    '<tr style="font-weight:700"><td>Total</td><td>'+totals.rr+'</td><td>'+totals.rrMeta+'</td><td>'+totals.vendas+'</td><td>—</td><td>'+money(totals.vendida)+'</td><td>'+totals.ativ+'</td><td>'+totals.ativMeta+'</td><td>'+money(totals.m1)+'</td><td>'+money(totals.m1Meta)+'</td><td>'+money(totals.caixa)+'</td><td>'+(totals.caixaMeta?money(totals.caixaMeta):'—')+'</td></tr>';
 }
 
 function renderConvChart(closers){

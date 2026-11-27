@@ -125,6 +125,11 @@ const METAS_BP_TATICO = {
     // Meta de Caixa: Rodrigo confirmou usar o número do bloco Total (489.750) mesmo com a soma
     // por closer (526.064) divergindo — mesma divergência conhecida, não escondida.
     caixa: 489750,
+    // Meta de Caixa por closer — linha "META CAIXA" do bloco Players por Closer da BP Tático -
+    // Outubro, lida direto da planilha em 2026-11-27 (soma 533.200, não os 526.064 citados no
+    // comentário acima — divergência não investigada, a sheet pode ter sido editada depois;
+    // Paulo ainda não tinha meta de Caixa individual, onboarding em 19/10).
+    caixaPorCloser: { Herico: 125600, Pedro: 44800, Filipe: 168000, Rafael: 194800 },
   },
   '2026-11': {
     // BP Tático - 2026 - Novembro.csv, repassado por Rodrigo em 2026-11-05. Tamara segue fora
@@ -168,6 +173,10 @@ const METAS_BP_TATICO = {
     // Pagamento M1 da BP Tático), não a soma de META CAIXA por closer (450.800) — mesmo critério
     // usado em setembro/outubro.
     caixa: 508300,
+    // Meta de Caixa por closer (card "Caixa Coletado" da seção Por Closer) — linha "META CAIXA"
+    // do bloco Players por Closer da BP Tático - Novembro. Paulo incluído (112.800) mesmo não
+    // entrando na soma usada acima (450.800), igual ao resto dos metaPorCloser já expostos.
+    caixaPorCloser: { Herico: 14400, Pedro: 112000, Filipe: 155200, Rafael: 169200, Paulo: 112800 },
   },
 };
 // Metas vazias pra qualquer competência fora do mapa acima (selecionada via ?mes= antes de eu
@@ -695,6 +704,7 @@ export default async function handler(req, res) {
     const META_RECEITA_CATEGORIA_VENDIDO = metaMes.receitaCategoriaVendido;
     const META_ATIVADOS = metaMes.ativados;
     const META_CAIXA = metaMes.caixa;
+    const META_CAIXA_POR_CLOSER = metaMes.caixaPorCloser || {};
     // Calculado a cada request (não no carregamento do módulo) — serverless functions ficam
     // "quentes" entre requests, então um valor calculado só na inicialização travaria no dia
     // do cold start em vez de acompanhar o dia real.
@@ -877,7 +887,7 @@ export default async function handler(req, res) {
         ativ, ativMeta: toNum(meta.meta_ativados),
         m1, m1Meta: toNum(meta.meta_receita_m1),
         vendas, vendida, vendasMeta: (META_VENDAS && META_VENDAS.porCloser[name]) || 0,
-        caixa,
+        caixa, caixaMeta: META_CAIXA_POR_CLOSER[name] || 0,
       };
     });
     // "Outros" — qualquer R.R/venda de um closer fora do roster fixo (ex.: Rodrigo Paranhos
@@ -896,15 +906,15 @@ export default async function handler(req, res) {
         ativ, ativMeta: 0,
         m1: outrosSales.filter(r => isAtivado(r)).reduce((a, r) => a + receitaAtivadaValor(r), 0), m1Meta: 0,
         vendas: outrosSales.length, vendida: outrosSales.reduce((a, r) => a + toNum(r.receita_m1), 0), vendasMeta: 0,
-        caixa: outrosSales.filter(r => isAtivado(r)).reduce((a, r) => a + valorPagoEfetivo(r), 0),
+        caixa: outrosSales.filter(r => isAtivado(r)).reduce((a, r) => a + valorPagoEfetivo(r), 0), caixaMeta: 0,
         outros: true,
       });
     }
     const totalsCloser = closers.reduce((a, c) => ({
       rr: a.rr + c.rr, rrMeta: a.rrMeta + c.rrMeta, vendas: a.vendas + c.vendas,
       vendida: a.vendida + c.vendida, ativ: a.ativ + c.ativ, ativMeta: a.ativMeta + c.ativMeta,
-      m1: a.m1 + c.m1, m1Meta: a.m1Meta + c.m1Meta, caixa: a.caixa + c.caixa,
-    }), { rr: 0, rrMeta: 0, vendas: 0, vendida: 0, ativ: 0, ativMeta: 0, m1: 0, m1Meta: 0, caixa: 0 });
+      m1: a.m1 + c.m1, m1Meta: a.m1Meta + c.m1Meta, caixa: a.caixa + c.caixa, caixaMeta: a.caixaMeta + c.caixaMeta,
+    }), { rr: 0, rrMeta: 0, vendas: 0, vendida: 0, ativ: 0, ativMeta: 0, m1: 0, m1Meta: 0, caixa: 0, caixaMeta: 0 });
 
     // ---------- PROPRIETÁRIO ("Quem entrou" na reunião) ----------
     // closer_pipeline_control.participantes_reuniao vem normalizado em papéis canônicos
