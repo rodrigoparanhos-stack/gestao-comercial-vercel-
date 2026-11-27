@@ -605,14 +605,27 @@ function resolveTier(row, tierIndex) {
 // matching por token de CANAL_AQUISICAO_OVERRIDES acima, pra nunca bater por substring colada.
 const CHURN_M0_OVERRIDES = [
   { nome: 'DLOOK BAY LOJA DANI LTDA' },
+  // Alupi: venda fechada (Rafael, Saber R$14.050, 12x) mas as 12 parcelas vieram PERDIDO no
+  // Conta Azul (nunca recebeu nada, valor_pago_conta_azul=0) — pedido por Rodrigo 2026-11-27.
+  { nome: 'Alupi' },
 ];
 const CHURN_M0_TOKENS = CHURN_M0_OVERRIDES
   .map(o => normNameTokens(o.nome))
   .filter(tokens => tokensQualify(tokens));
 function isChurnM0(empresa) {
   const queryTokens = normNameTokens(empresa);
-  if (!tokensQualify(queryTokens)) return false;
+  if (!queryTokens.length) return false;
   const qSet = new Set(queryTokens);
+  // Match exato (mesmo conjunto de tokens dos 2 lados, nada sobrando) sempre vale, mesmo pra
+  // nome de 1 token curto (ex. "Alupi", 5 letras) — só pula o filtro de 6+ letras do
+  // tokensQualify quando é igualdade completa, nunca em subset/substring, então não reabre a
+  // brecha que esse filtro existe pra fechar (ver comentário de tokensQualify acima).
+  const exactMatch = CHURN_M0_OVERRIDES.some(o => {
+    const tokens = normNameTokens(o.nome);
+    return tokens.length === queryTokens.length && tokens.every(t => qSet.has(t));
+  });
+  if (exactMatch) return true;
+  if (!tokensQualify(queryTokens)) return false;
   return CHURN_M0_TOKENS.some(tokens => {
     const cSet = new Set(tokens);
     return tokens.every(t => qSet.has(t)) || queryTokens.every(t => cSet.has(t));
@@ -724,7 +737,14 @@ export default async function handler(req, res) {
     // (rrTotal, m1TotalBruto, byCloserSnapshot[name].rr mais abaixo), então só filtrar os arrays
     // calls/sales não mudaria o número exibido: é preciso também descontar de totals/byCloser aqui,
     // no único lugar por onde o snapshot passa antes de qualquer cálculo usá-lo.
-    const EXCLUDED_DEAL_IDS = new Set(['9dfaa656-cf9c-428b-af72-33be9cdb0d30', 'f94d8083-731c-40dc-9443-de53b0ae1519']);
+    // TONI INTERMEDIACAO LTDA (= "Carflix Jacareí" no CRM/lead, "Carflix Anchieta" no Conta Azul
+    // — mesmo op_id, mesma franquia Carflix do caso Penha/RPG acima): closer Herico, SDR
+    // Recomendação alleson.santos@, R$12.055,21 já 100% recebido (6/6 parcelas RECEBIDO). Pedido
+    // por Rodrigo 2026-11-27, mesmo motivo/mesmo padrão da Carflix Penha.
+    const EXCLUDED_DEAL_IDS = new Set([
+      '9dfaa656-cf9c-428b-af72-33be9cdb0d30', 'f94d8083-731c-40dc-9443-de53b0ae1519',
+      '395c34c7-f757-4312-85bf-8180f93fd2c9', 'da122f03-cafb-4e0b-adf7-20a390049f23',
+    ]);
     // EXCLUDED_RR_IDS: diferente de EXCLUDED_DEAL_IDS acima — aqui o R.M continua contando normal
     // (a reunião foi agendada de verdade), só o R.R sai, porque o CRM registrou
     // reuniao_realizada=SIM errado (devia ser No-show). Por isso NÃO entra no rmOverrideDelta
